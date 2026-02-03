@@ -71,7 +71,7 @@ export default function Navbar() {
 
                 {/* Right Side Buttons */}
                 <div className="flex items-center gap-3">
-                    <Link to="/auth?mode=login">
+                    <Link to="/auth" state={{ mode: "login" }}>
                         <Button
                             variant="ghost"
                             className="text-sm hover:bg-white/10 hover:text-white text-muted-foreground"
@@ -79,7 +79,7 @@ export default function Navbar() {
                             Login
                         </Button>
                     </Link>
-                    <Link to="/auth?mode=signup">
+                    <Link to="/auth" state={{ mode: "signup" }}>
                         <Button
                             size="sm"
                             className="bg-white text-black hover:bg-white/90 transition-all duration-300 rounded-full px-6"

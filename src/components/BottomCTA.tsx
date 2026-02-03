@@ -24,7 +24,7 @@ export function BottomCTA() {
                         Join thousands of users who have taken back control of their data. No credit card required.
                     </p>
 
-                    <Link to="/auth?mode=signup">
+                    <Link to="/auth" state={{ mode: "signup" }}>
                         <Button size="lg" className="group rounded-full text-lg px-8 py-7 bg-white text-black hover:bg-neutral-200 hover:text-black shadow-[0_0_30px_rgba(255,255,255,0.2)] transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(255,255,255,0.4)] cursor-target">
                             Get Started Now
                             <ArrowRight className="ml-2 w-5 h-5 transition-transform group-hover:translate-x-1" />

@@ -67,7 +67,7 @@ export default function LandingPage() {
                             transition={{ delay: 0.8, duration: 0.5 }}
                             className="text-center text-neutral-400 mt-4 max-w-lg mx-auto text-xl font-light"
                         >
-                            Aegis is the open-source, client-side encrypted password manager that <DecryptedText
+                            Aegis is a open-source, client-side encrypted password manager that <DecryptedText
                                 text="puts you in control."
                                 animateOn="view"
                                 revealDirection="start"
@@ -86,7 +86,7 @@ export default function LandingPage() {
                             className="flex flex-col items-center mt-12"
                         >
                             <div className="flex gap-6 mb-12">
-                                <Link to="/auth?mode=signup">
+                                <Link to="/auth" state={{ mode: "signup" }}>
                                     <Button size="lg" className="group/cta rounded-full text-lg px-8 py-7 bg-blue-600 hover:bg-blue-700 shadow-[0_0_30px_rgba(37,99,235,0.4)] transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(37,99,235,0.6)] cursor-target cursor-none">
                                         Start for Free
                                         <ArrowRight className="ml-2 w-5 h-5 transition-transform group-hover/cta:translate-x-1" />

@@ -43,7 +43,7 @@ export default function Footer() {
                                 <Link to="/#security" className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Security</Link>
                             </li>
                             <li>
-                                <Link to="/auth?mode=signup" className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Get Started</Link>
+                                <Link to="/auth" state={{ mode: "signup" }} className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Get Started</Link>
                             </li>
                         </ul>
                     </div>
@@ -93,7 +93,7 @@ export default function Footer() {
 
                 <div className="pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
                     <p className="text-neutral-500 text-xs">
-                        &copy; {new Date().getFullYear()} Aegis Password Manager. Open Source.
+                        &copy; {new Date().getFullYear()} Aegis Password Manager. By <a href="https://sampreeth.in/" target="_blank" className="hover:text-blue-500">Sampreeth</a>
                     </p>
 
                     <div className="flex items-center gap-6">
