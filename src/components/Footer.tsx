@@ -56,10 +56,10 @@ export default function Footer() {
                                 <a href="https://github.com/sampreeth/aegis-password-manager" target="_blank" rel="noopener noreferrer" className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Source Code</a>
                             </li>
                             <li>
-                                <a href="#" className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Documentation</a>
+                                <a href="https://github.com/sam-sampreeth/aegis-password-manager/blob/main/README.md" className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Documentation</a>
                             </li>
                             <li>
-                                <a href="#" className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Privacy Policy</a>
+                                <Link to="/terms" className="text-neutral-400 hover:text-blue-400 text-sm transition-colors">Privacy Policy</Link>
                             </li>
                         </ul>
                     </div>

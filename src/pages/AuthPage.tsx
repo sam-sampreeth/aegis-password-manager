@@ -8,7 +8,7 @@ import { Github } from "lucide-react"
 import Tooltip from "@mui/material/Tooltip"
 import { Meteors } from "@/components/ui/meteors"
 
-import { useLocation } from "react-router-dom"
+import { useLocation, Link } from "react-router-dom"
 
 export default function AuthPage() {
     const location = useLocation()
@@ -138,19 +138,19 @@ export default function AuthPage() {
 
                     <p className="px-8 text-center text-sm text-muted-foreground">
                         By clicking continue, you agree to our{" "}
-                        <a
-                            href="/terms"
+                        <Link
+                            to="/terms"
                             className="underline underline-offset-4 hover:text-primary"
                         >
                             Terms of Service
-                        </a>{" "}
+                        </Link>{" "}
                         and{" "}
-                        <a
-                            href="/privacy"
+                        <Link
+                            to="/terms#privacy"
                             className="underline underline-offset-4 hover:text-primary"
                         >
                             Privacy Policy
-                        </a>
+                        </Link>
                         .
                     </p>
                 </div>
