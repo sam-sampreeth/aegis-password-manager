@@ -3,18 +3,87 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { motion } from "framer-motion";
 import {
     User,
-    Mail,
     Lock,
     ShieldCheck,
     Save,
-    Upload,
-    Camera
+    LogOut,
+    ShieldAlert,
+    Unlock,
+    KeyRound,
+    Settings,
+    Laptop,
+    Smartphone,
+    Globe
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { useLock } from "@/context/LockContext";
 
 export default function ProfilePage() {
+    const navigate = useNavigate();
+    const { isLocked, lockVault } = useLock();
+    const [isEditing, setIsEditing] = useState(false);
+
+    // Mock Data State
+    const [profile, setProfile] = useState({
+        displayName: "Sampreeth",
+        username: "sam_dev",
+        email: "sam@example.com",
+        jobTitle: "Software Engineer",
+        location: "San Francisco, CA"
+    });
+
+    const [tempProfile, setTempProfile] = useState(profile);
+
+    const handleSave = () => {
+        setProfile(tempProfile);
+        setIsEditing(false);
+        toast.success("Profile updated successfully");
+    };
+
+    const handleCancel = () => {
+        setTempProfile(profile);
+        setIsEditing(false);
+    };
+
+    const handleLogout = () => {
+        // In a real app, clear auth tokens here
+        toast.promise(
+            new Promise((resolve) => setTimeout(resolve, 1000)),
+            {
+                loading: 'Logging out...',
+                success: () => {
+                    navigate("/auth");
+                    return "Logged out successfully";
+                },
+                error: 'Error logging out'
+            }
+        );
+    };
+
+    const sessions = [
+        {
+            device: "MacBook Pro 16\"",
+            browser: "Chrome 120.0",
+            location: "San Francisco, US",
+            lastActive: "Active Now",
+            isCurrent: true,
+            icon: Laptop
+        },
+        {
+            device: "iPhone 15 Pro",
+            browser: "Safari Mobile",
+            location: "San Francisco, US",
+            lastActive: "2 hours ago",
+            isCurrent: false,
+            icon: Smartphone
+        }
+    ];
+
     return (
         <div className="flex-1 h-screen overflow-y-auto bg-black text-white p-6 md:p-12 pb-24">
             <motion.div
@@ -22,114 +91,236 @@ export default function ProfilePage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="max-w-4xl mx-auto space-y-8"
             >
-                {/* Header */}
-                <div className="flex items-end justify-between border-b border-white/10 pb-6">
+                {/* Header Profile Section */}
+                <div className="flex flex-col md:flex-row items-start md:items-end justify-between border-b border-white/10 pb-8 gap-6">
                     <div className="flex items-center gap-6">
                         <div className="relative group">
-                            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-3xl font-bold group-hover:opacity-80 transition-opacity cursor-pointer">
-                                S
-                            </div>
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Camera className="w-8 h-8 text-white drop-shadow-lg" />
+                            <div className="w-24 h-24 rounded-full border-2 border-white/10 overflow-hidden">
+                                <img src="https://github.com/shadcn.png" alt="Profile" className="w-full h-full object-cover" />
                             </div>
                         </div>
-                        <div>
-                            <h1 className="text-3xl font-bold">Sampreeth</h1>
-                            <p className="text-neutral-400">sam@example.com</p>
+                        <div className="space-y-1">
+                            <h1 className="text-3xl font-bold">{profile.displayName}</h1>
+                            <div className="flex items-center gap-2 text-neutral-400">
+                                <span>@{profile.username}</span>
+                                <span>•</span>
+                                <span>{profile.email}</span>
+                            </div>
                             <div className="flex gap-2 mt-2">
-                                <Badge variant="secondary" className="bg-green-900/30 text-green-400 border-green-500/20">Active Subscription</Badge>
-                                <Badge variant="outline" className="border-white/10 text-neutral-400">Basic Plan</Badge>
+                                <Badge variant="secondary" className="bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20">
+                                    Pro Plan
+                                </Badge>
+                                <Badge variant="outline" className="text-neutral-400 border-white/10">
+                                    Member since Jan 2024
+                                </Badge>
                             </div>
                         </div>
                     </div>
-                    <Button className="hidden md:flex gap-2">
-                        <Save className="w-4 h-4" />
-                        Save Changes
-                    </Button>
+
+                    <div className="flex gap-3 w-full md:w-auto">
+                        {isEditing ? (
+                            <>
+                                <Button variant="ghost" onClick={handleCancel}>Cancel</Button>
+                                <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700">
+                                    <Save className="w-4 h-4 mr-2" />
+                                    Save Changes
+                                </Button>
+                            </>
+                        ) : (
+                            <Button variant="outline" onClick={() => setIsEditing(true)} className="border-white/10 hover:bg-white/5">
+                                Edit Profile
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
-                {/* Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {/* Personal Info */}
-                    <div className="space-y-6">
-                        <div className="flex items-center gap-2 text-lg font-semibold text-blue-400">
-                            <User className="w-5 h-5" />
-                            <h2>Personal Information</h2>
-                        </div>
-                        <div className="space-y-4 p-6 rounded-xl border border-white/10 bg-zinc-900/30">
-                            <div className="space-y-2">
-                                <Label>Display Name</Label>
-                                <Input defaultValue="Sampreeth" className="bg-zinc-950/50 border-white/10" />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Job Title</Label>
-                                <Input defaultValue="Software Engineer" className="bg-zinc-950/50 border-white/10" />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Location</Label>
-                                <Input defaultValue="San Francisco, CA" className="bg-zinc-950/50 border-white/10" />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Security Info */}
-                    <div className="space-y-6">
-                        <div className="flex items-center gap-2 text-lg font-semibold text-emerald-400">
-                            <ShieldCheck className="w-5 h-5" />
-                            <h2>Security & Login</h2>
-                        </div>
-                        <div className="space-y-4 p-6 rounded-xl border border-white/10 bg-zinc-900/30">
-                            <div className="space-y-2">
-                                <Label>Email Address</Label>
-                                <div className="flex items-center gap-2">
-                                    <Mail className="w-4 h-4 text-neutral-500" />
-                                    <Input defaultValue="sam@example.com" disabled className="bg-zinc-950/30 border-white/5 text-neutral-500" />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Master Password</Label>
-                                <div className="flex gap-2">
-                                    <Button variant="outline" className="w-full justify-start text-neutral-400 border-white/10 hover:bg-white/5 hover:text-white">
-                                        <Lock className="w-4 h-4 mr-2" />
-                                        Change Master Password
-                                    </Button>
-                                </div>
-                            </div>
-                            <div className="pt-2">
-                                <Label className="mb-2 block">Two-Factor Authentication</Label>
-                                <div className="flex items-center justify-between p-3 rounded-lg border border-green-500/20 bg-green-500/5">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center text-green-500">
-                                            <ShieldCheck className="w-4 h-4" />
-                                        </div>
-                                        <div>
-                                            <div className="font-medium text-green-400">Enabled</div>
-                                            <div className="text-xs text-green-400/60">Using Authenticator App</div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Left Column: Personal Info & Stats */}
+                    <div className="lg:col-span-2 space-y-8">
+                        {/* Basic Info Card */}
+                        <Card className="bg-zinc-900/30 border-white/10">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2 text-white">
+                                    <User className="w-5 h-5 text-blue-400" />
+                                    Personal Information
+                                </CardTitle>
+                                <CardDescription>Manage your public profile details</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Display Name</Label>
+                                        <Input
+                                            value={tempProfile.displayName}
+                                            onChange={(e) => setTempProfile({ ...tempProfile, displayName: e.target.value })}
+                                            disabled={!isEditing}
+                                            className="bg-zinc-950/50 border-white/10 disabled:opacity-100"
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Username</Label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-2.5 text-neutral-500">@</span>
+                                            <Input
+                                                value={tempProfile.username}
+                                                onChange={(e) => setTempProfile({ ...tempProfile, username: e.target.value })}
+                                                disabled={!isEditing}
+                                                className="bg-zinc-950/50 border-white/10 pl-7 disabled:opacity-100"
+                                            />
                                         </div>
                                     </div>
-                                    <Button variant="ghost" size="sm" className="text-green-400 hover:text-green-300 hover:bg-green-500/10">
-                                        Configure
+                                    <div className="space-y-2 md:col-span-2">
+                                        <Label>Email Address</Label>
+                                        <div className="flex gap-2">
+                                            <Input
+                                                value={profile.email}
+                                                disabled
+                                                className="bg-zinc-950/30 border-white/5 text-neutral-500"
+                                            />
+                                            {isEditing && (
+                                                <Button variant="outline" size="sm" className="border-white/10">Change</Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Sessions Card */}
+                        <Card className="bg-zinc-900/30 border-white/10">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2 text-white">
+                                    <Globe className="w-5 h-5 text-purple-400" />
+                                    Active Sessions
+                                </CardTitle>
+                                <CardDescription>Manage devices logged into your account</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-6">
+                                {sessions.map((session, idx) => (
+                                    <div key={idx} className="flex items-center justify-between">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center">
+                                                <session.icon className="w-5 h-5 text-neutral-400" />
+                                            </div>
+                                            <div>
+                                                <div className="font-medium flex items-center gap-2">
+                                                    {session.device}
+                                                    {session.isCurrent && (
+                                                        <Badge variant="secondary" className="bg-green-500/10 text-green-400 text-[10px] h-5 px-1.5">
+                                                            Current
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                                <div className="text-sm text-neutral-400 flex items-center gap-2">
+                                                    <span>{session.browser}</span>
+                                                    <span>•</span>
+                                                    <span>{session.location}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-sm font-medium">{session.lastActive}</div>
+                                            {!session.isCurrent && (
+                                                <Button variant="link" className="text-red-400 h-auto p-0 text-xs hover:text-red-300">
+                                                    Revoke
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                                <Button variant="outline" className="w-full border-white/10 text-neutral-400 hover:text-white hover:bg-white/5">
+                                    Log out all other devices
+                                </Button>
+                            </CardContent>
+                        </Card>
+                    </div>
+
+                    {/* Right Column: Security & Actions */}
+                    <div className="space-y-8">
+                        {/* Security Summary */}
+                        <Card className="bg-zinc-900/30 border-white/10">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2 text-white">
+                                    <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                                    Security Status
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {/* Auth Method */}
+                                <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950/50 border border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        <KeyRound className="w-4 h-4 text-neutral-400" />
+                                        <div className="text-sm">
+                                            <div className="font-medium text-white">Auth Method</div>
+                                            <div className="text-xs text-neutral-500">Email & Password</div>
+                                        </div>
+                                    </div>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-neutral-400 hover:text-white">
+                                        <Settings className="w-4 h-4" />
                                     </Button>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
-                {/* Danger Zone */}
-                <div className="space-y-6 pt-8 border-t border-white/10">
-                    <h2 className="text-lg font-semibold text-red-500">Danger Zone</h2>
-                    <div className="p-6 rounded-xl border border-red-500/20 bg-red-500/5 flex flex-col md:flex-row items-center justify-between gap-4">
-                        <div>
-                            <h3 className="font-medium text-red-400">Delete Account</h3>
-                            <p className="text-sm text-red-400/60">Permanently delete your account and all stored passwords.</p>
+                                {/* Vault Status */}
+                                <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950/50 border border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        {isLocked ? (
+                                            <Lock className="w-4 h-4 text-orange-400" />
+                                        ) : (
+                                            <Unlock className="w-4 h-4 text-green-400" />
+                                        )}
+                                        <div className="text-sm">
+                                            <div className="font-medium text-white">Vault Status</div>
+                                            <div className={isLocked ? "text-orange-400 text-xs" : "text-green-400 text-xs"}>
+                                                {isLocked ? "Locked" : "Unlocked"}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {!isLocked && (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 h-8"
+                                            onClick={() => lockVault("manual")}
+                                        >
+                                            Lock
+                                        </Button>
+                                    )}
+                                </div>
+
+                                {/* MFA */}
+                                <div className="flex items-center justify-between p-3 rounded-lg bg-zinc-950/50 border border-white/5">
+                                    <div className="flex items-center gap-3">
+                                        <ShieldAlert className="w-4 h-4 text-neutral-400" />
+                                        <div className="text-sm">
+                                            <div className="font-medium text-white">MFA</div>
+                                            <div className="text-xs text-neutral-500">Disabled</div>
+                                        </div>
+                                    </div>
+                                    <Button variant="ghost" size="sm" className="text-blue-400 h-8 p-0 hover:text-blue-300">Enable</Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Account Actions */}
+                        <div className="space-y-4">
+                            <h3 className="text-sm font-medium text-neutral-400 px-1">Account Actions</h3>
+                            <Button
+                                variant="outline"
+                                className="w-full justify-start text-red-400 border-red-500/10 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/20"
+                                onClick={handleLogout}
+                            >
+                                <LogOut className="w-4 h-4 mr-2" />
+                                Log Out
+                            </Button>
                         </div>
-                        <Button variant="destructive" className="bg-red-500/10 text-red-500 hover:bg-red-500/20 border-red-500/20 border">
-                            Delete Account
-                        </Button>
+
+                        <div className="text-xs text-center text-neutral-600 space-y-1">
+                            <p>Last login: Today at 2:30 PM</p>
+                            <p>Account ID: #882-991-002</p>
+                        </div>
                     </div>
                 </div>
             </motion.div>
         </div>
-    )
+    );
 }
