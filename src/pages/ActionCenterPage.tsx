@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { ShieldAlert, RefreshCcw, Clock, ArrowRight, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { VaultItemIcon } from "@/components/vault/VaultItemIcon";
 
 export default function ActionCenterPage() {
     // Analytics Logic
@@ -143,9 +144,7 @@ export default function ActionCenterPage() {
                                         stats.weak.map(item => (
                                             <div key={item.id} className="flex items-center justify-between p-3 rounded-lg bg-zinc-950 border border-white/5 hover:border-red-500/30 group transition-all">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 font-bold text-xs">
-                                                        {item.name.charAt(0)}
-                                                    </div>
+                                                    <VaultItemIcon item={item} className="w-8 h-8 text-xs" />
                                                     <div>
                                                         <div className="font-medium text-sm">{item.name}</div>
                                                         <div className="text-xs text-neutral-500">{item.username}</div>
@@ -155,8 +154,7 @@ export default function ActionCenterPage() {
                                                     Fix <ArrowRight className="w-3 h-3" />
                                                 </Button>
                                             </div>
-                                        ))
-                                    )}
+                                        )))}
                                 </div>
                             </motion.div>
                         </div>

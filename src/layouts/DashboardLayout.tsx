@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
-import { Link, Outlet, useNavigate } from "react-router-dom";
+import { Link, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
     LayoutDashboard,
@@ -13,6 +13,7 @@ import {
     Sparkles,
     Trash2,
     Lock,
+    LockKeyhole,
     Bell
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,16 +34,24 @@ function DashboardContent() {
     const [isSecuring, setIsSecuring] = useState(false);
     const [securingType, setSecuringType] = useState<"lock" | "logout" | null>(null);
     const navigate = useNavigate();
+    const location = useLocation();
 
-    // If locked, unmount EVERYTHING and show LockScreen
-    if (isLocked) {
-        return (
-            <>
-                <LockScreen />
-                <Toaster /> {/* Keep Toaster for feedback */}
-            </>
-        );
-    }
+    // Determine if the current route requires a lock
+    // Safe routes: Settings, Generator, Profile
+    // Protected routes: Vault (index), Trash, Action Center, Notifications
+    const isRouteProtected = () => {
+        const path = location.pathname;
+        if (path.startsWith("/vault/settings")) return false;
+        if (path.startsWith("/vault/generator")) return false;
+        if (path.startsWith("/profile")) return false;
+
+        // Block main vault and other sub-routes
+        if (path.startsWith("/vault")) return true;
+
+        return false;
+    };
+
+    const showLockScreen = isLocked && isRouteProtected();
 
     const handleSecureAction = (type: "lock" | "logout") => {
         setIsSecuring(true);
@@ -53,7 +62,7 @@ function DashboardContent() {
             setSecuringType(null);
 
             if (type === "lock") {
-                lockVault();
+                lockVault("manual");
             } else {
                 navigate("/auth");
             }
@@ -114,7 +123,7 @@ function DashboardContent() {
         >
             {/* Secure Action Overlay */}
             {isSecuring && (
-                <div className="absolute inset-0 z-50 bg-zinc-950/90 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
+                <div className="absolute inset-0 z-[60] bg-zinc-950/90 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in duration-300">
                     <div className="flex flex-col items-center gap-4">
                         <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
                         <div className="text-xl font-medium text-white">
@@ -157,7 +166,7 @@ function DashboardContent() {
                                 label: "Lock Vault",
                                 href: "#",
                                 icon: (
-                                    <Lock className="h-5 w-5 flex-shrink-0" />
+                                    <LockKeyhole className="h-5 w-5 flex-shrink-0" />
                                 ),
                             }}
                             className="hover:bg-blue-500/10 hover:text-blue-400 rounded-md"
@@ -190,8 +199,12 @@ function DashboardContent() {
                     </div>
                 </SidebarBody>
             </Sidebar>
-            <div className="flex-1 flex flex-col overflow-hidden bg-black text-white">
-                <Outlet />
+            <div className="flex-1 flex flex-col overflow-hidden bg-black text-white relative">
+                {showLockScreen ? (
+                    <LockScreen />
+                ) : (
+                    <Outlet />
+                )}
                 <Toaster />
             </div>
         </div>

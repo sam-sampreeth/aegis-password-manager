@@ -45,7 +45,7 @@ export const VaultItemIcon = ({ item, className = "w-10 h-10" }: { item: VaultIt
 
     return (
         <div className={`${className} rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-bold shrink-0 ring-1 ring-blue-500/30`}>
-            {item.name ? item.name.charAt(0).toUpperCase() : <Globe className="w-1/2 h-1/2" />}
+            <Globe className="w-1/2 h-1/2" />
         </div>
     );
 };

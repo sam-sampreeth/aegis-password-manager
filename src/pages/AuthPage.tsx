@@ -5,14 +5,38 @@ import { Label } from "@/components/ui/label"
 import DecryptedText from "@/components/reactbits/DecryptedText"
 import { motion } from "framer-motion"
 import { Github } from "lucide-react"
-import Tooltip from "@mui/material/Tooltip"
 import { Meteors } from "@/components/ui/meteors"
-
-import { useLocation, Link } from "react-router-dom"
+import { useLocation, Link, useNavigate } from "react-router-dom"
+import { SignUpWizard } from "@/components/auth/SignUpWizard"
+import { ForgotPasswordWizard } from "@/components/auth/ForgotPasswordWizard"
+import { toast } from "sonner"
 
 export default function AuthPage() {
-    const location = useLocation()
-    const [isLogin, setIsLogin] = useState(location.state?.mode !== "signup")
+    const location = useLocation();
+    const navigate = useNavigate();
+
+    // Determine mode from URL
+    const isSignup = location.pathname.includes("/signup");
+    const isForgot = location.pathname.includes("/forgot-password");
+    const isLogin = !isSignup && !isForgot;
+
+    // If starting with OAuth (simulated), we skip credentials and go to profile
+    const [oauthStart, setOauthStart] = useState(false);
+
+    const handleGithubLogin = () => {
+        // Simulation of OAuth callback
+        toast.info("Simulating GitHub OAuth...");
+        setTimeout(() => {
+            setOauthStart(true);
+            navigate("/auth/signup");
+        }, 800);
+    };
+
+    const handleLogin = () => {
+        // Simple login simulation
+        toast.success("Welcome back!");
+        navigate("/vault");
+    };
 
     return (
         <div className="flex min-h-screen w-full">
@@ -48,93 +72,98 @@ export default function AuthPage() {
 
             {/* Right Side - Form */}
             <div className="flex w-full lg:w-1/2 items-center justify-center bg-background p-8">
-                <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
-                    <div className="flex flex-col space-y-2 text-center">
-                        <h1 className="text-2xl font-semibold tracking-tight">
-                            {isLogin ? "Welcome back" : "Create an account"}
-                        </h1>
-                        <p className="text-sm text-muted-foreground">
-                            {isLogin
-                                ? "Enter your credentials to access your vault"
-                                : "Enter your email below to create your account"}
-                        </p>
-                    </div>
+                {/* Increased width from sm:w-[350px] to sm:w-[450px] to fit Wizard content better */}
+                <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[450px]">
 
-                    <motion.div
-                        key={isLogin ? "login" : "signup"}
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: -20 }}
-                        transition={{ duration: 0.2 }}
-                        className="space-y-6"
-                    >
-                        <div className="space-y-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="email">Email</Label>
-                                <Input id="email" type="email" placeholder="name@example.com" required />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="password">Password</Label>
-                                <Input id="password" type="password" required />
-                            </div>
-
-                            {!isLogin && (
-                                <div className="space-y-2">
-                                    <Label htmlFor="confirm-password">Confirm Password</Label>
-                                    <Input id="confirm-password" type="password" required />
-                                </div>
-                            )}
+                    {/* Hide this header when in ForgotPassword mode to avoid duplication */}
+                    {!isForgot && (
+                        <div className="flex flex-col space-y-2 text-center">
+                            <h1 className="text-2xl font-semibold tracking-tight">
+                                {isLogin ? "Welcome back" : "Create an account"}
+                            </h1>
+                            <p className="text-sm text-muted-foreground">
+                                {isLogin
+                                    ? "Enter your credentials to access your vault"
+                                    : "Follow the steps to secure your new vault"}
+                            </p>
                         </div>
+                    )}
 
-                        {isLogin && (
+                    {isSignup ? (
+                        <SignUpWizard
+                            initialStep={oauthStart ? "PROFILE" : "CREDENTIALS"}
+                            onBackToLogin={() => {
+                                setOauthStart(false);
+                                navigate("/auth");
+                            }}
+                        />
+                    ) : isForgot ? (
+                        <ForgotPasswordWizard onBackToLogin={() => navigate("/auth")} />
+                    ) : (
+                        <motion.div
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -20 }}
+                            className="space-y-6"
+                        >
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="email">Email</Label>
+                                    <Input id="email" type="email" placeholder="name@example.com" required />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="password">Password</Label>
+                                    <Input id="password" type="password" required />
+                                </div>
+                            </div>
+
                             <div className="flex items-center justify-between text-sm">
                                 <Label className="flex items-center gap-2 font-normal cursor-pointer">
                                     <Input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
                                     Remember me
                                 </Label>
-                                <a href="#" className="font-medium text-primary hover:underline">
+                                <Link
+                                    to="/auth/forgot-password"
+                                    className="font-medium text-primary hover:underline"
+                                >
                                     Forgot password?
-                                </a>
+                                </Link>
                             </div>
-                        )}
 
-                        <Button className="w-full" size="lg">
-                            {isLogin ? "Sign In" : "Create Account"}
-                        </Button>
-                    </motion.div>
+                            <Button className="w-full" size="lg" onClick={handleLogin}>
+                                Sign In
+                            </Button>
 
-                    <div className="relative">
-                        <div className="absolute inset-0 flex items-center">
-                            <span className="w-full border-t" />
-                        </div>
-                        <div className="relative flex justify-center text-xs">
-                            <span className="bg-background px-2 text-muted-foreground">
-                                Or continue with
-                            </span>
-                        </div>
-                    </div>
+                            <div className="relative">
+                                <div className="absolute inset-0 flex items-center">
+                                    <span className="w-full border-t" />
+                                </div>
+                                <div className="relative flex justify-center text-xs">
+                                    <span className="bg-background px-2 text-muted-foreground">
+                                        Or continue with
+                                    </span>
+                                </div>
+                            </div>
 
-                    <Tooltip title="Coming soon" placement="right" arrow>
-                        <span tabIndex={0} className="block w-full mt-4">
-                            <Button variant="outline" className="w-full" disabled>
+                            <Button variant="outline" className="w-full" onClick={handleGithubLogin}>
                                 <Github className="mr-2 h-4 w-4" />
                                 GitHub
                             </Button>
-                        </span>
-                    </Tooltip>
 
-                    {/* Toggle Link */}
-                    <div className="text-center text-sm">
-                        <span className="text-muted-foreground">
-                            {isLogin ? "Don't have an account? " : "Already have an account? "}
-                        </span>
-                        <button
-                            onClick={() => setIsLogin(!isLogin)}
-                            className="font-medium text-primary underline-offset-4 hover:underline"
-                        >
-                            {isLogin ? "Sign up" : "Sign in"}
-                        </button>
-                    </div>
+                            <div className="text-center text-sm">
+                                <span className="text-muted-foreground">
+                                    Don't have an account?{" "}
+                                </span>
+                                <Link
+                                    to="/auth/signup"
+                                    className="font-medium text-primary underline-offset-4 hover:underline"
+                                >
+                                    Sign up
+                                </Link>
+                            </div>
+                        </motion.div>
+                    )}
+
 
                     <p className="px-8 text-center text-sm text-muted-foreground">
                         By clicking continue, you agree to our{" "}

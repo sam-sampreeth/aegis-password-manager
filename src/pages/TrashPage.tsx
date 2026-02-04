@@ -21,6 +21,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils";
+import { VaultItemIcon } from "@/components/vault/VaultItemIcon";
 
 // Mock Trash Data
 const initialTrash = dummyVault.slice(0, 3).map(item => ({
@@ -133,9 +134,7 @@ export default function TrashPage() {
                                             className="group flex items-center justify-between p-4 rounded-lg border border-white/5 bg-zinc-900/30 hover:bg-zinc-900 hover:border-white/10 transition-all cursor-default"
                                         >
                                             <div className="flex items-center gap-4 min-w-0">
-                                                <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center text-neutral-400 font-bold shrink-0">
-                                                    {item.name.charAt(0)}
-                                                </div>
+                                                <VaultItemIcon item={item} className="w-10 h-10 rounded-lg" />
                                                 <div className="min-w-0">
                                                     <div className="font-medium text-white truncate decoration-neutral-500">{item.name}</div>
                                                     <div className="text-sm text-neutral-500 truncate">{item.username}</div>
