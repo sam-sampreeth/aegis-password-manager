@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from "react";
-import { Settings, Shield, HardDrive, Bell, Download, Upload, AlertTriangle, Lock, RefreshCw, Smartphone, KeyRound, Loader2, Activity, Eye, EyeOff, Check } from "lucide-react";
+import { Settings, Shield, HardDrive, Bell, Download, Upload, AlertTriangle, Lock, RefreshCw, Smartphone, KeyRound, Loader2, Activity, Eye, EyeOff, Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -72,7 +72,7 @@ export default function SettingsPage() {
 
         setRecoveryCodesUsed(usageEvents.length);
     }, [activities]);
-    const [mfaEnabled, setMfaEnabled] = useState(false);
+
     const [recoveryCodesGenerated, setRecoveryCodesGenerated] = useState(false);
     const [recoveryCodesUsed, setRecoveryCodesUsed] = useState(0);
     const [regenerateMasterPassword, setRegenerateMasterPassword] = useState("");
@@ -103,6 +103,19 @@ export default function SettingsPage() {
     const [importStats, setImportStats] = useState({ total: 0, duplicates: 0 });
     const [importConfirmText, setImportConfirmText] = useState("");
 
+    // MFA State
+    const [mfaEnabled, setMfaEnabled] = useState(false);
+    const [isMfaModalOpen, setIsMfaModalOpen] = useState(false);
+    const [mfaStep, setMfaStep] = useState<'intro' | 'scan' | 'verify' | 'success'>('intro');
+    const [mfaSecret, setMfaSecret] = useState("");
+    const [mfaQr, setMfaQr] = useState("");
+    const [mfaFactorId, setMfaFactorId] = useState("");
+    const [mfaCode, setMfaCode] = useState("");
+    const [mfaError, setMfaError] = useState("");
+    const [mfaLoading, setMfaLoading] = useState(false);
+    const [isDisableMfaDialogOpen, setIsDisableMfaDialogOpen] = useState(false);
+    const [disableMfaPassword, setDisableMfaPassword] = useState("");
+
     // Delete Account State
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [deleteStep, setDeleteStep] = useState<'warning' | 'confirm' | 'verify'>('warning');
@@ -114,6 +127,119 @@ export default function SettingsPage() {
     const handleManualLock = () => {
         lockVault("manual");
         toast.success("Vault locked successfully");
+    };
+
+    useEffect(() => {
+        const checkMfaStatus = async () => {
+            const { data, error } = await supabase.auth.mfa.listFactors();
+            if (error) {
+                console.error("Error fetching MFA factors:", error);
+                return;
+            }
+            const totpFactor = data.totp.find(f => f.status === 'verified');
+            setMfaEnabled(!!totpFactor);
+        };
+        checkMfaStatus();
+    }, []);
+
+    const handleMfaToggle = (checked: boolean) => {
+        if (checked) {
+            setMfaStep('intro');
+            setIsMfaModalOpen(true);
+        } else {
+            setIsDisableMfaDialogOpen(true);
+        }
+    };
+
+    const handleMfaEnroll = async () => {
+        setMfaLoading(true);
+        setMfaError("");
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const { data, error } = await supabase.auth.mfa.enroll({
+                factorType: 'totp',
+                issuer: 'Aegis',
+                friendlyName: user?.email || 'User'
+            });
+
+            if (error) throw error;
+
+            setMfaFactorId(data.id);
+            setMfaSecret(data.totp.secret);
+            setMfaQr(data.totp.qr_code);
+            setMfaStep('scan');
+        } catch (err: any) {
+            console.error("Error enrolling MFA:", err);
+            setMfaError(err.message || "Failed to start setup");
+        } finally {
+            setMfaLoading(false);
+        }
+    };
+
+    const handleMfaVerify = async () => {
+        if (mfaCode.length !== 6) {
+            setMfaError("Code must be 6 digits");
+            return;
+        }
+
+        setMfaLoading(true);
+        setMfaError("");
+        try {
+            const { data, error } = await supabase.auth.mfa.challengeAndVerify({
+                factorId: mfaFactorId,
+                code: mfaCode
+            });
+
+            if (error) throw error;
+
+            await logActivity('mfa_enabled', {});
+            setMfaEnabled(true);
+            setMfaStep('success');
+        } catch (err: any) {
+            console.error("Error verifying MFA:", err);
+            setMfaError("Invalid code. Please try again.");
+        } finally {
+            setMfaLoading(false);
+        }
+    };
+
+    const handleMfaDisable = async () => {
+        setMfaLoading(true);
+        try {
+            // Verify master password first
+            if ((settings as any)?.encrypted_vault_key && (settings as any)?.vault_key_salt) {
+                // @ts-ignore
+                const masterKey = await deriveMasterKey(disableMfaPassword, (settings as any).vault_key_salt as string);
+                // @ts-ignore
+                const vaultKey = await decryptVaultKey((settings as any).encrypted_vault_key as string, masterKey);
+                if (!vaultKey) {
+                    toast.error("Incorrect master password");
+                    setMfaLoading(false);
+                    return;
+                }
+            }
+
+            const { data: factors } = await supabase.auth.mfa.listFactors();
+            const totpFactor = factors?.totp.find(f => f.status === 'verified');
+
+            if (totpFactor) {
+                const { error } = await supabase.auth.mfa.unenroll({
+                    factorId: totpFactor.id
+                });
+                if (error) throw error;
+            }
+
+            await logActivity('mfa_disabled', {});
+            setMfaEnabled(false);
+            setIsDisableMfaDialogOpen(false);
+            setDisableMfaPassword("");
+            toast.success("Two-Factor Authentication disabled");
+        } catch (err: any) {
+            console.error("Error disabling MFA:", err);
+            toast.error(err.message || "Failed to disable MFA");
+        } finally {
+            setMfaLoading(false);
+        }
     };
 
     // Password Strength
@@ -951,12 +1077,14 @@ export default function SettingsPage() {
                                             <div className="text-sm text-neutral-500">Secure your account login with 2FA</div>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <Checkbox
-                                                id="mfa-toggle"
-                                                checked={mfaEnabled}
-                                                onCheckedChange={(c) => setMfaEnabled(c as boolean)}
-                                                className="border-white/20 data-[state=checked]:bg-purple-600 data-[state=checked]:text-white w-6 h-6"
-                                            />
+                                            <Button
+                                                variant={mfaEnabled ? "destructive" : "default"}
+                                                size="sm"
+                                                onClick={() => handleMfaToggle(!mfaEnabled)}
+                                                className={mfaEnabled ? "bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/20" : ""}
+                                            >
+                                                {mfaEnabled ? "Disable 2FA" : "Enable 2FA"}
+                                            </Button>
                                         </div>
                                     </div>
 
@@ -1538,6 +1666,196 @@ export default function SettingsPage() {
 
                     </div>
                 </div>
+                {/* MFA Enrollment Dialog */}
+                <Dialog open={isMfaModalOpen} onOpenChange={(open) => {
+                    setIsMfaModalOpen(open);
+                    if (!open && mfaStep !== 'success') {
+                        setMfaStep('intro');
+                        setMfaError("");
+                        setMfaCode("");
+                    }
+                }}>
+                    <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px]">
+                        <DialogHeader>
+                            <DialogTitle>Two-Factor Authentication Setup</DialogTitle>
+                        </DialogHeader>
+
+                        {mfaStep === 'intro' && (
+                            <div className="space-y-4 py-4">
+                                <div className="flex items-center justify-center p-4 bg-primary/10 rounded-full w-16 h-16 mx-auto mb-2">
+                                    <Shield className="w-8 h-8 text-primary" />
+                                </div>
+                                <div className="text-center space-y-2">
+                                    <h3 className="font-medium text-lg">Secure Your Account</h3>
+                                    <p className="text-neutral-400 text-sm">
+                                        Two-Factor Authentication adds an extra layer of security to your account.
+                                        You'll need an authenticator app (like Google Authenticator or Authy) to generate verification codes.
+                                    </p>
+                                </div>
+                                <DialogFooter className="pt-4">
+                                    <Button variant="ghost" onClick={() => setIsMfaModalOpen(false)}>Cancel</Button>
+                                    <Button onClick={handleMfaEnroll} disabled={mfaLoading}>
+                                        {mfaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Continue"}
+                                    </Button>
+                                </DialogFooter>
+                            </div>
+                        )}
+
+                        {mfaStep === 'scan' && (
+                            <div className="space-y-4 py-2">
+                                <div className="space-y-2 text-center">
+                                    <p className="text-sm text-neutral-400">Scan this QR code with your authenticator app</p>
+                                    <div className="flex justify-center items-center p-4 bg-white rounded-lg w-fit mx-auto">
+                                        {mfaQr ? (
+                                            <div dangerouslySetInnerHTML={{ __html: mfaQr }} />
+                                        ) : (
+                                            <div className="w-48 h-48 flex items-center justify-center bg-neutral-100 rounded">
+                                                <Loader2 className="w-8 h-8 text-zinc-900 animate-spin" />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-neutral-500 uppercase tracking-wider">Manual Entry Key</Label>
+                                    <div className="flex items-center gap-2">
+                                        <code className="flex-1 p-2 bg-zinc-900 rounded border border-white/10 font-mono text-sm text-center select-all">
+                                            {mfaSecret}
+                                        </code>
+                                        <Button
+                                            size="icon"
+                                            variant="outline"
+                                            className="shrink-0 border-white/10"
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(mfaSecret);
+                                                toast.success("Secret copied");
+                                            }}
+                                        >
+                                            <Copy className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-start gap-2 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-200 text-xs mt-2">
+                                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                                    <span>Do not close this window until setup is complete.</span>
+                                </div>
+
+                                <DialogFooter className="pt-2">
+                                    <Button variant="ghost" onClick={() => setMfaStep('intro')}>Back</Button>
+                                    <Button onClick={() => setMfaStep('verify')}>Continue</Button>
+                                </DialogFooter>
+                            </div>
+                        )}
+
+                        {mfaStep === 'verify' && (
+                            <div className="space-y-4 py-4">
+                                <div className="text-center space-y-2">
+                                    <h3 className="font-medium">Verify Setup</h3>
+                                    <p className="text-neutral-400 text-sm">
+                                        Enter the 6-digit code from your authenticator app to enable 2FA.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Authentication Code</Label>
+                                    <div className="relative flex justify-center gap-2">
+                                        <Input
+                                            value={mfaCode}
+                                            onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                            className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-default"
+                                            maxLength={6}
+                                            autoFocus
+                                            autoComplete="one-time-code"
+                                            inputMode="numeric"
+                                        />
+                                        {Array.from({ length: 6 }).map((_, i) => (
+                                            <div
+                                                key={i}
+                                                className={`w-12 h-14 rounded-lg border flex items-center justify-center text-2xl font-mono transition-all ${mfaCode[i]
+                                                        ? "border-primary bg-primary/10 text-primary" // Filled state
+                                                        : i === mfaCode.length
+                                                            ? "border-primary/50 bg-zinc-900 shadow-[0_0_0_1px_rgba(168,85,247,0.4)]" // Active/Focused state
+                                                            : "border-white/10 bg-zinc-900 text-neutral-500" // Empty state
+                                                    }`}
+                                            >
+                                                {mfaCode[i] || ""}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {mfaError && <p className="text-xs text-red-500">{mfaError}</p>}
+                                </div>
+
+                                <DialogFooter className="pt-2">
+                                    <Button variant="ghost" onClick={() => setMfaStep('scan')}>Back</Button>
+                                    <Button
+                                        onClick={handleMfaVerify}
+                                        disabled={mfaLoading || mfaCode.length !== 6}
+                                    >
+                                        {mfaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify & Enable"}
+                                    </Button>
+                                </DialogFooter>
+                            </div>
+                        )}
+
+                        {mfaStep === 'success' && (
+                            <div className="space-y-4 py-6 text-center">
+                                <div className="flex items-center justify-center p-4 bg-green-500/10 rounded-full w-16 h-16 mx-auto mb-2">
+                                    <Check className="w-8 h-8 text-green-500" />
+                                </div>
+                                <div className="space-y-2">
+                                    <h3 className="font-medium text-lg text-green-500">2FA Enabled Successfully!</h3>
+                                    <p className="text-neutral-400 text-sm">
+                                        Your account is now secured with Two-Factor Authentication.
+                                        You will need to use your authenticator app next time you sign in.
+                                    </p>
+                                </div>
+                                <Button onClick={() => setIsMfaModalOpen(false)} className="w-full mt-4 bg-zinc-800 hover:bg-zinc-700">
+                                    Done
+                                </Button>
+                            </div>
+                        )}
+                    </DialogContent>
+                </Dialog>
+
+                {/* Disable MFA Dialog */}
+                <Dialog open={isDisableMfaDialogOpen} onOpenChange={setIsDisableMfaDialogOpen}>
+                    <DialogContent className="bg-zinc-900 border-white/10 text-white sm:max-w-[425px]">
+                        <DialogHeader>
+                            <DialogTitle className="text-red-500 flex items-center gap-2">
+                                <Shield className="w-5 h-5" /> Disable Two-Factor Authentication?
+                            </DialogTitle>
+                            <DialogDescription className="text-neutral-400">
+                                This will remove the extra layer of security from your account. Verify your master password to continue.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                                <Label>Master Password</Label>
+                                <Input
+                                    type="password"
+                                    value={disableMfaPassword}
+                                    onChange={(e) => setDisableMfaPassword(e.target.value)}
+                                    placeholder="Verify identity..."
+                                    className="bg-zinc-950 border-white/10"
+                                />
+                            </div>
+                        </div>
+
+                        <DialogFooter>
+                            <Button variant="ghost" onClick={() => setIsDisableMfaDialogOpen(false)}>Cancel</Button>
+                            <Button
+                                variant="destructive"
+                                onClick={handleMfaDisable}
+                                disabled={mfaLoading || !disableMfaPassword}
+                            >
+                                {mfaLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Disable 2FA"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
             </div>
         </div >
     );

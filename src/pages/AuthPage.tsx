@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import DecryptedText from "@/components/reactbits/DecryptedText"
 import { motion } from "framer-motion"
-import { Github, Eye, EyeOff } from "lucide-react"
+import { Github, Eye, EyeOff, Shield, Loader2, Check } from "lucide-react"
 import { Meteors } from "@/components/ui/meteors"
 import { useLocation, Link, useNavigate } from "react-router-dom"
 import { SignUpWizard } from "@/components/auth/SignUpWizard"
@@ -41,6 +41,13 @@ export default function AuthPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [shake, setShake] = useState(false);
+    const [rememberMe, setRememberMe] = useState(true);
+
+    // MFA State
+    const [showMfa, setShowMfa] = useState(false);
+    const [mfaCode, setMfaCode] = useState("");
+    const [mfaLoading, setMfaLoading] = useState(false);
+    const [mfaError, setMfaError] = useState("");
 
     const handleGithubLogin = async () => {
         try {
@@ -56,6 +63,9 @@ export default function AuthPage() {
     const handleLogin = async () => {
         try {
             setLoading(true);
+
+            // TODO: storage persistence configuration
+
             const { error } = await supabase.auth.signInWithPassword({
                 email,
                 password,
@@ -63,8 +73,20 @@ export default function AuthPage() {
 
             if (error) throw error;
 
-            toast.success("Welcome back!");
-            navigate("/vault");
+            // Check for MFA enrollment
+            const { data, error: mfaError } = await supabase.auth.mfa.listFactors();
+            if (mfaError) throw mfaError;
+
+            const totpFactor = data.totp.find(f => f.status === 'verified');
+
+            if (totpFactor) {
+                // MFA Enabled - Show Verification Screen
+                setShowMfa(true);
+            } else {
+                // No MFA - Proceed to Vault
+                toast.success("Welcome back!");
+                navigate("/vault");
+            }
         } catch (error: any) {
             setShake(true);
             setTimeout(() => setShake(false), 500);
@@ -73,6 +95,38 @@ export default function AuthPage() {
             });
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleMfaVerify = async () => {
+        setMfaLoading(true);
+        setMfaError("");
+        try {
+            const { data: factors } = await supabase.auth.mfa.listFactors();
+            const totpFactor = factors?.totp.find(f => f.status === 'verified');
+
+            if (!totpFactor) {
+                // Should not happen if we got here, but safety check
+                navigate("/vault");
+                return;
+            }
+
+            const { error } = await supabase.auth.mfa.challengeAndVerify({
+                factorId: totpFactor.id,
+                code: mfaCode,
+            });
+
+            if (error) throw error;
+
+            toast.success("Identity Verified");
+            navigate("/vault");
+
+        } catch (error: any) {
+            setMfaError(error.message || "Invalid code");
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+        } finally {
+            setMfaLoading(false);
         }
     };
 
@@ -108,7 +162,7 @@ export default function AuthPage() {
             {/* Right Side - Form */}
             <div className="flex w-full lg:w-1/2 items-center justify-center bg-background p-8">
                 <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[450px]">
-                    {!isForgot && (
+                    {!isForgot && !showMfa && (
                         <div className="flex flex-col space-y-2 text-center">
                             <h1 className="text-2xl font-semibold tracking-tight">
                                 {isLogin ? "Welcome back" : "Create an account"}
@@ -130,6 +184,87 @@ export default function AuthPage() {
                         />
                     ) : isForgot ? (
                         <ForgotPasswordWizard onBackToLogin={() => navigate("/auth")} />
+                    ) : showMfa ? (
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="space-y-6"
+                        >
+                            <div className="flex flex-col space-y-2 text-center">
+                                <div className="flex items-center justify-center p-4 bg-primary/10 rounded-full w-16 h-16 mx-auto mb-2">
+                                    <Shield className="w-8 h-8 text-primary" />
+                                </div>
+                                <h1 className="text-2xl font-semibold tracking-tight">Security Check</h1>
+                                <p className="text-sm text-muted-foreground">
+                                    Enter the 2FA code from your authenticator app.
+                                </p>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <div className="relative flex justify-center gap-2">
+                                        <Input
+                                            value={mfaCode}
+                                            onChange={(e) => {
+                                                setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                                                if (mfaError) setMfaError("");
+                                            }}
+                                            className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-default"
+                                            maxLength={6}
+                                            autoFocus
+                                            autoComplete="one-time-code"
+                                            inputMode="numeric"
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && mfaCode.length === 6) {
+                                                    handleMfaVerify();
+                                                }
+                                            }}
+                                        />
+                                        {Array.from({ length: 6 }).map((_, i) => (
+                                            <div
+                                                key={i}
+                                                className={`w-12 h-14 rounded-lg border flex items-center justify-center text-2xl font-mono transition-all ${mfaCode[i]
+                                                    ? "border-primary bg-primary/10 text-primary"
+                                                    : i === mfaCode.length
+                                                        ? "border-primary/50 bg-background shadow-[0_0_0_1px_rgba(168,85,247,0.4)]"
+                                                        : "border-border bg-background text-muted-foreground"
+                                                    }`}
+                                            >
+                                                {mfaCode[i] || ""}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {mfaError && <p className="text-xs text-red-500 text-center font-medium">{mfaError}</p>}
+                                </div>
+
+                                <motion.div
+                                    animate={shake ? { x: [-10, 10, -10, 10, 0] } : {}}
+                                    transition={{ duration: 0.4 }}
+                                >
+                                    <Button
+                                        className="w-full"
+                                        size="lg"
+                                        onClick={handleMfaVerify}
+                                        disabled={mfaLoading || mfaCode.length !== 6}
+                                    >
+                                        {mfaLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                                        Verify Identity
+                                    </Button>
+                                </motion.div>
+
+                                <Button
+                                    variant="ghost"
+                                    className="w-full"
+                                    onClick={() => {
+                                        setShowMfa(false);
+                                        setMfaCode("");
+                                        setMfaError("");
+                                    }}
+                                >
+                                    Back to Login
+                                </Button>
+                            </div>
+                        </motion.div>
                     ) : (
                         <motion.div
                             initial={{ opacity: 0, x: 20 }}
@@ -178,7 +313,12 @@ export default function AuthPage() {
 
                             <div className="flex items-center justify-between text-sm">
                                 <Label className="flex items-center gap-2 font-normal cursor-pointer">
-                                    <Input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
+                                    <Input
+                                        type="checkbox"
+                                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                        checked={rememberMe}
+                                        onChange={(e) => setRememberMe(e.target.checked)}
+                                    />
                                     Remember me
                                 </Label>
                                 <Link
@@ -248,6 +388,6 @@ export default function AuthPage() {
                     </p>
                 </div>
             </div>
-        </div>
+        </div >
     )
 }
