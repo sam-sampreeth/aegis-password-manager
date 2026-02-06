@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { Settings, Shield, HardDrive, Bell, Download, Upload, AlertTriangle, Lock, RefreshCw, Smartphone, KeyRound, Loader2, Activity, Eye, EyeOff, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -29,8 +29,9 @@ import {
 import { useLock } from "@/context/LockContext";
 import { useVaultActivity } from "@/hooks/useVaultActivity";
 import { useUserSettings } from "@/hooks/useProfiles";
+import { useVaultItems } from "@/hooks/useVault";
 import { supabase } from "@/lib/supabase";
-import { deriveMasterKey, decryptVaultKey, generateRecoveryCodeData } from "@/lib/crypto";
+import { deriveMasterKey, decryptVaultKey, generateRecoveryCodeData, exportVault, importVault } from "@/lib/crypto";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -39,6 +40,7 @@ export default function SettingsPage() {
     const { lockVault } = useLock();
     const { activities, logActivity } = useVaultActivity();
     const { settings, loading: settingsLoading, updateSettings } = useUserSettings();
+    const { items: vaultItems, importItems, clearVault } = useVaultItems();
     const [autoLockTimer, setAutoLockTimer] = useState(15); // 0 = Never
 
     // Sync autoLockTimer with database settings
@@ -90,6 +92,16 @@ export default function SettingsPage() {
     const [exportStep, setExportStep] = useState<'warning' | 'verify' | 'processing'>('warning');
     const [exportMasterPassword, setExportMasterPassword] = useState("");
     const [exportCountdown, setExportCountdown] = useState(3);
+
+    // Import Vault State
+    const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+    const [importStep, setImportStep] = useState<'warning' | 'mode' | 'file' | 'decrypt' | 'summary' | 'processing'>('warning');
+    const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
+    const [importFile, setImportFile] = useState<string | null>(null);
+    const [importPassword, setImportPassword] = useState("");
+    const [decryptedImportItems, setDecryptedImportItems] = useState<any[]>([]);
+    const [importStats, setImportStats] = useState({ total: 0, duplicates: 0 });
+    const [importConfirmText, setImportConfirmText] = useState("");
 
     // Delete Account State
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -206,6 +218,7 @@ export default function SettingsPage() {
             // @ts-ignore - Supabase type inference issue
             const { error: updateError } = await supabase
                 .from('user_settings')
+                // @ts-ignore
                 .update({
                     encrypted_recovery_codes: JSON.stringify({
                         codes: recoveryData.codes,
@@ -253,11 +266,11 @@ export default function SettingsPage() {
                 .eq('user_id', user.id)
                 .single();
 
-            if (settings?.encrypted_vault_key && settings?.vault_key_salt) {
+            if ((settings as any)?.encrypted_vault_key && (settings as any)?.vault_key_salt) {
                 // @ts-ignore - Supabase type inference issue
-                const masterKey = await deriveMasterKey(deleteMasterPassword, settings.vault_key_salt as string);
+                const masterKey = await deriveMasterKey(deleteMasterPassword, (settings as any).vault_key_salt as string);
                 // @ts-ignore - Supabase type inference issue
-                const vaultKey = await decryptVaultKey(settings.encrypted_vault_key as string, masterKey);
+                const vaultKey = await decryptVaultKey((settings as any).encrypted_vault_key as string, masterKey);
 
                 if (!vaultKey) {
                     toast.error("Incorrect master password", {
@@ -294,12 +307,74 @@ export default function SettingsPage() {
         setExportCountdown(3);
     };
 
-    const handleExportVerify = () => {
+    const handleExportVerify = async () => {
         if (exportMasterPassword.length < 4) {
             toast.error("Please enter your Master Password");
             return;
         }
-        setExportStep('processing');
+
+        try {
+            // 1. Verify password first (reuse existing logic from other sensitive actions)
+            // @ts-ignore
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) {
+                toast.error("User not found");
+                return;
+            }
+
+            // We verify by trying to unlock the vault key with it (proof of ownership)
+            // Ideally we should reuse a verifyMasterPassword helper, but for now we follow the pattern in this file
+            if (settings?.encrypted_vault_key && settings?.vault_key_salt) {
+                // @ts-ignore
+                const masterKey = await deriveMasterKey(exportMasterPassword, settings.vault_key_salt as string);
+                // @ts-ignore
+                const vaultKey = await decryptVaultKey(settings.encrypted_vault_key as string, masterKey);
+
+                if (!vaultKey) {
+                    toast.error("Incorrect master password");
+                    return;
+                }
+            } else {
+                // Fallback or error if no vault key set up?
+                // If the user has items they must have a key. 
+                // We'll proceed if verification passes.
+            }
+
+            setExportStep('processing');
+
+            // 2. Perform Export (Small delay to show processing state)
+            setTimeout(async () => {
+                try {
+                    const jsonString = await exportVault(vaultItems, exportMasterPassword);
+
+                    // 3. Trigger Download
+                    const blob = new Blob([jsonString], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    link.download = `aegis-vault-encrypted-${dateStr}.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+
+                    // 4. Log Activity
+                    await logActivity('vault_export', { timestamp: new Date().toISOString() });
+
+                    // 5. Success
+                    // Countdown effect will finish the dialog closing in useEffect
+                } catch (err: any) {
+                    console.error("Export failed", err);
+                    toast.error("Export failed: " + err.message);
+                    setExportStep('warning'); // Go back
+                }
+            }, 1000);
+
+        } catch (error: any) {
+            console.error("Export verification failed:", error);
+            toast.error("Verification failed");
+        }
     };
 
     useEffect(() => {
@@ -313,6 +388,125 @@ export default function SettingsPage() {
         }
         return () => clearTimeout(timer);
     }, [exportStep, exportCountdown]);
+
+    // Import Handlers
+    const handleImportInitiate = () => {
+        setIsImportDialogOpen(true);
+        setImportStep('warning');
+        setImportMode('append');
+        setImportFile(null);
+        setImportPassword("");
+        setDecryptedImportItems([]);
+        setImportConfirmText("");
+    };
+
+    const handleImportFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const text = await file.text();
+            setImportFile(text);
+        } catch (error) {
+            toast.error("Failed to read file");
+        }
+    };
+
+    const handleImportDecrypt = async () => {
+        if (!importFile || !importPassword) return;
+
+        try {
+            const items = await importVault(importFile, importPassword);
+            setDecryptedImportItems(items);
+
+            // Calculate stats
+            const duplicates = items.filter(newItem =>
+                vaultItems.some(existing =>
+                    existing.name === newItem.name &&
+                    existing.username === newItem.username &&
+                    existing.category === newItem.category
+                )
+            ).length;
+
+            setImportStats({
+                total: items.length,
+                duplicates
+            });
+
+            setImportStep('summary');
+        } catch (error: any) {
+            toast.error("Decryption failed: " + error.message);
+        }
+    };
+
+    const handleImportExecute = async () => {
+        try {
+            if (importMode === 'replace') {
+                if (importConfirmText !== 'REPLACE MY VAULT') {
+                    toast.error("Please type the confirmation phrase exactly");
+                    return;
+                }
+
+                // Verify master password again for destructive action
+                // Reuse delete logic verification style
+                // @ts-ignore
+                const { data: { user } } = await supabase.auth.getUser();
+                if ((settings as any)?.encrypted_vault_key && (settings as any)?.vault_key_salt) {
+                    // @ts-ignore
+                    const masterKey = await deriveMasterKey(importPassword, (settings as any).vault_key_salt as string);
+                    // @ts-ignore
+                    const vaultKey = await decryptVaultKey((settings as any).encrypted_vault_key as string, masterKey);
+
+                    if (!vaultKey) {
+                        toast.error("Incorrect master password for verification");
+                        return;
+                    }
+                }
+
+                await clearVault();
+                await logActivity('vault_import_replaced', { count: decryptedImportItems.length });
+            } else {
+                // Append mode logic
+                const uniqueItems = decryptedImportItems.filter(newItem =>
+                    !vaultItems.some(existing =>
+                        existing.name === newItem.name &&
+                        existing.username === newItem.username &&
+                        existing.category === newItem.category
+                    )
+                );
+
+                if (uniqueItems.length === 0 && decryptedImportItems.length > 0) {
+                    toast.info("All items were duplicates and skipped.");
+                    setIsImportDialogOpen(false);
+                    return;
+                }
+                // Update state just in case, though we pass valid list below
+                setDecryptedImportItems(uniqueItems);
+
+                await logActivity('vault_import_appended', { count: uniqueItems.length });
+            }
+
+            setImportStep('processing');
+
+            // Execute batch insert
+            const finalItems = importMode === 'replace' ? decryptedImportItems : decryptedImportItems.filter(newItem =>
+                !vaultItems.some(existing =>
+                    existing.name === newItem.name &&
+                    existing.username === newItem.username &&
+                    existing.category === newItem.category
+                )
+            );
+
+            await importItems(finalItems);
+
+            toast.success("Vault imported successfully");
+            setIsImportDialogOpen(false);
+
+        } catch (error: any) {
+            console.error("Import execution failed:", error);
+            toast.error("Import failed: " + error.message);
+        }
+    };
 
     // Delete countdown effect
     useEffect(() => {
@@ -781,86 +975,276 @@ export default function SettingsPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {/* Data */}
                                 <div className="p-6 rounded-xl border border-white/5 bg-zinc-900/50 space-y-6">
-                                    <h3 className="text-lg font-medium flex items-center gap-2">
-                                        <HardDrive className="w-5 h-5 text-neutral-400" /> Data Management
-                                    </h3>
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-3 p-3 rounded bg-zinc-950/50 border border-white/5">
-                                            <Download className="w-5 h-5 text-blue-500" />
-                                            <div className="flex-1">
-                                                <div className="font-medium text-sm">Export Vault</div>
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="space-y-0.5">
+                                                <h3 className="text-lg font-medium flex items-center gap-2">
+                                                    <HardDrive className="w-5 h-5 text-neutral-400" /> Data Management
+                                                </h3>
+                                                <p className="text-sm text-neutral-500">
+                                                    Backup your vault or import from file.
+                                                </p>
                                             </div>
+                                        </div>
 
-                                            <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+                                        <div className="grid grid-cols-2 gap-4 pt-4">
+                                            <Button
+                                                variant="outline"
+                                                className="h-auto py-4 border-white/10 hover:bg-zinc-800 flex flex-col gap-2"
+                                                onClick={handleExportInitiate}
+                                            >
+                                                <Upload className="w-5 h-5 mb-1" />
+                                                <span className="font-medium">Export Vault</span>
+                                                <span className="text-xs text-neutral-500 font-normal">Encrypted JSON</span>
+                                            </Button>
+
+                                            <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
                                                 <DialogTrigger asChild>
-                                                    <Button variant="ghost" size="sm" className="h-8 hover:bg-white/10" onClick={handleExportInitiate}>
-                                                        Export
+                                                    <Button
+                                                        variant="outline"
+                                                        className="h-auto py-4 border-white/10 hover:bg-zinc-800 flex flex-col gap-2"
+                                                        onClick={handleImportInitiate}
+                                                    >
+                                                        <Download className="w-5 h-5 mb-1" />
+                                                        <span className="font-medium">Import Vault</span>
+                                                        <span className="text-xs text-neutral-500 font-normal">Restore backup</span>
                                                     </Button>
                                                 </DialogTrigger>
                                                 <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[500px]">
                                                     <DialogHeader>
-                                                        <DialogTitle className="flex items-center gap-2 text-red-500">
-                                                            <AlertTriangle className="w-5 h-5" />
-                                                            Export Vault
-                                                        </DialogTitle>
+                                                        <DialogTitle>Import Vault</DialogTitle>
+                                                        <DialogDescription className="text-neutral-400">
+                                                            Restore your passwords from an encrypted Aegis backup.
+                                                        </DialogDescription>
                                                     </DialogHeader>
 
-                                                    {exportStep === 'warning' && (
-                                                        <div className="space-y-4">
-                                                            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-100 text-sm">
-                                                                <p className="font-semibold mb-2">Warning: Exposing Sensitive Data</p>
-                                                                <p>Exporting your vault will convert all your encrypted passwords into a plain text file. Anyone with access to this file can view all your passwords.</p>
+                                                    {/* Import Wizard Steps */}
+                                                    {importStep === 'warning' && (
+                                                        <div className="space-y-4 py-4">
+                                                            <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-200 text-sm">
+                                                                <Shield className="w-5 h-5 shrink-0 mt-0.5" />
+                                                                <div>
+                                                                    <span className="font-bold">Security Notice:</span> Only import files you created yourself. You will need the exact Master Password used to encrypt the backup file.
+                                                                </div>
                                                             </div>
                                                             <DialogFooter>
-                                                                <Button variant="ghost" onClick={() => setIsExportDialogOpen(false)}>Cancel</Button>
-                                                                <Button variant="destructive" onClick={() => setExportStep('verify')}>I Understand, Continue</Button>
+                                                                <Button variant="ghost" onClick={() => setIsImportDialogOpen(false)}>Cancel</Button>
+                                                                <Button onClick={() => setImportStep('mode')}>Continue</Button>
                                                             </DialogFooter>
                                                         </div>
                                                     )}
 
-                                                    {exportStep === 'verify' && (
-                                                        <div className="space-y-4">
-                                                            <DialogDescription>
-                                                                Please enter your Master Password to authorize this export.
-                                                            </DialogDescription>
+                                                    {importStep === 'mode' && (
+                                                        <div className="space-y-4 py-4">
+                                                            <div className="space-y-3">
+                                                                <div
+                                                                    className={cn(
+                                                                        "p-4 rounded-lg border cursor-pointer transition-all",
+                                                                        importMode === 'append' ? "bg-blue-500/10 border-blue-500" : "bg-zinc-900 border-white/10 hover:border-white/20"
+                                                                    )}
+                                                                    onClick={() => setImportMode('append')}
+                                                                >
+                                                                    <div className="flex items-center gap-2 font-medium mb-1">
+                                                                        <div className={cn("w-4 h-4 rounded-full border flex items-center justify-center", importMode === 'append' ? "border-blue-500" : "border-neutral-500")}>
+                                                                            {importMode === 'append' && <div className="w-2 h-2 bg-blue-500 rounded-full" />}
+                                                                        </div>
+                                                                        Append to existing vault
+                                                                    </div>
+                                                                    <p className="text-sm text-neutral-400 pl-6">
+                                                                        Add items to your current vault. Existing duplicates will be skipped.
+                                                                    </p>
+                                                                </div>
+
+                                                                <div
+                                                                    className={cn(
+                                                                        "p-4 rounded-lg border cursor-pointer transition-all",
+                                                                        importMode === 'replace' ? "bg-red-500/10 border-red-500" : "bg-zinc-900 border-white/10 hover:border-white/20"
+                                                                    )}
+                                                                    onClick={() => setImportMode('replace')}
+                                                                >
+                                                                    <div className="flex items-center gap-2 font-medium mb-1 text-red-400">
+                                                                        <div className={cn("w-4 h-4 rounded-full border flex items-center justify-center", importMode === 'replace' ? "border-red-500" : "border-neutral-500")}>
+                                                                            {importMode === 'replace' && <div className="w-2 h-2 bg-red-500 rounded-full" />}
+                                                                        </div>
+                                                                        Replace current vault
+                                                                    </div>
+                                                                    <p className="text-sm text-neutral-400 pl-6">
+                                                                        Permanently delete current items and replace with backup data.
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <DialogFooter>
+                                                                <Button variant="ghost" onClick={() => setImportStep('warning')}>Back</Button>
+                                                                <Button onClick={() => setImportStep('file')}>Continue</Button>
+                                                            </DialogFooter>
+                                                        </div>
+                                                    )}
+
+                                                    {importStep === 'file' && (
+                                                        <div className="space-y-4 py-4">
                                                             <div className="space-y-2">
-                                                                <Label>Master Password</Label>
+                                                                <Label>Select Backup File</Label>
+                                                                <div className="relative">
+                                                                    <Input
+                                                                        type="file"
+                                                                        id="import-file"
+                                                                        accept=".json"
+                                                                        onChange={handleImportFileSelect}
+                                                                        className="hidden"
+                                                                    />
+                                                                    <Label
+                                                                        htmlFor="import-file"
+                                                                        className="flex flex-col items-center justify-center w-full p-8 border-2 border-dashed border-white/10 rounded-lg cursor-pointer hover:border-blue-500/50 hover:bg-blue-500/5 transition-all group"
+                                                                    >
+                                                                        <div className="p-3 bg-zinc-900 rounded-full mb-3 group-hover:bg-blue-500/10 transition-colors">
+                                                                            <Upload className="w-6 h-6 text-neutral-400 group-hover:text-blue-400" />
+                                                                        </div>
+                                                                        <div className="text-sm font-medium text-neutral-300 text-center">
+                                                                            {importFile ? (
+                                                                                <span className="text-green-400 flex items-center gap-2">
+                                                                                    <Check className="w-4 h-4" /> Backup File Loaded
+                                                                                </span>
+                                                                            ) : (
+                                                                                <span>Click to select backup file</span>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="text-xs text-neutral-500 mt-1">
+                                                                            {importFile ? "Ready to decrypt" : "Supported format: .json"}
+                                                                        </div>
+                                                                    </Label>
+                                                                </div>
+                                                            </div>
+                                                            <DialogFooter>
+                                                                <Button variant="ghost" onClick={() => setImportStep('mode')}>Back</Button>
+                                                                <Button disabled={!importFile} onClick={() => setImportStep('decrypt')}>Continue</Button>
+                                                            </DialogFooter>
+                                                        </div>
+                                                    )}
+
+                                                    {importStep === 'decrypt' && (
+                                                        <div className="space-y-4 py-4">
+                                                            <div className="space-y-2">
+                                                                <Label>Enter Backup Password</Label>
+                                                                <p className="text-xs text-neutral-400">Enter the Master Password that was used to encrypt this file.</p>
                                                                 <Input
                                                                     type="password"
-                                                                    value={exportMasterPassword}
-                                                                    onChange={(e) => setExportMasterPassword(e.target.value)}
+                                                                    value={importPassword}
+                                                                    onChange={(e) => setImportPassword(e.target.value)}
                                                                     className="bg-zinc-900 border-white/10"
+                                                                    autoFocus
                                                                 />
                                                             </div>
                                                             <DialogFooter>
-                                                                <Button variant="ghost" onClick={() => setIsExportDialogOpen(false)}>Cancel</Button>
-                                                                <Button onClick={handleExportVerify} className="bg-blue-600 hover:bg-blue-700">Unlock & Export</Button>
+                                                                <Button variant="ghost" onClick={() => setImportStep('file')}>Back</Button>
+                                                                <Button disabled={!importPassword} onClick={handleImportDecrypt}>Decrypt & Preview</Button>
                                                             </DialogFooter>
                                                         </div>
                                                     )}
 
-                                                    {exportStep === 'processing' && (
-                                                        <div className="py-8 flex flex-col items-center justify-center space-y-4">
-                                                            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                                                            <div className="text-center">
-                                                                <h3 className="font-medium">Preparing Export</h3>
-                                                                <p className="text-sm text-neutral-500">Decrypting vault data...</p>
-                                                                {exportCountdown > 0 && <p className="text-xs text-neutral-600 mt-2">Starting in {exportCountdown}s...</p>}
+                                                    {importStep === 'summary' && (
+                                                        <div className="space-y-4 py-4">
+                                                            <div className="space-y-3">
+                                                                <h4 className="font-medium text-green-400 flex items-center gap-2">
+                                                                    <Check className="w-4 h-4" /> Decryption Successful
+                                                                </h4>
+                                                                <div className="grid grid-cols-2 gap-4 text-center">
+                                                                    <div className="p-3 bg-zinc-900 rounded border border-white/10">
+                                                                        <div className="text-2xl font-bold">{importStats.total}</div>
+                                                                        <div className="text-xs text-neutral-500">Items Found</div>
+                                                                    </div>
+                                                                    <div className="p-3 bg-zinc-900 rounded border border-white/10">
+                                                                        <div className="text-2xl font-bold">{importMode === 'append' ? importStats.duplicates : '-'}</div>
+                                                                        <div className="text-xs text-neutral-500">{importMode === 'append' ? 'Skipped (Duplicates)' : 'Will replace all'}</div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {importMode === 'replace' && (
+                                                                    <div className="space-y-2 pt-2">
+                                                                        <Label className="text-red-400">Confirm Replacement</Label>
+                                                                        <Input
+                                                                            value={importConfirmText}
+                                                                            onChange={(e) => setImportConfirmText(e.target.value)}
+                                                                            placeholder="Type 'REPLACE MY VAULT'"
+                                                                            className="bg-red-950/20 border-red-500/30 text-red-200 placeholder:text-red-700"
+                                                                        />
+                                                                    </div>
+                                                                )}
                                                             </div>
+                                                            <DialogFooter>
+                                                                <Button variant="ghost" onClick={() => setImportStep('file')}>Cancel</Button>
+                                                                <Button
+                                                                    onClick={handleImportExecute}
+                                                                    variant={importMode === 'replace' ? "destructive" : "default"}
+                                                                    disabled={importMode === 'replace' && importConfirmText !== 'REPLACE MY VAULT'}
+                                                                >
+                                                                    {importMode === 'replace' ? 'Replace Vault' : 'Import Items'}
+                                                                </Button>
+                                                            </DialogFooter>
+                                                        </div>
+                                                    )}
+
+                                                    {importStep === 'processing' && (
+                                                        <div className="py-8 flex flex-col items-center justify-center space-y-4">
+                                                            <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                                                            <p className="text-neutral-400">Importing your vault data...</p>
                                                         </div>
                                                     )}
                                                 </DialogContent>
                                             </Dialog>
-
-
                                         </div>
-                                        <div className="flex items-center gap-3 p-3 rounded bg-zinc-950/50 border border-white/5">
-                                            <Upload className="w-5 h-5 text-purple-500" />
-                                            <div className="flex-1">
-                                                <div className="font-medium text-sm">Import Passwords</div>
-                                            </div>
-                                            <Button variant="ghost" size="sm" className="h-8 hover:bg-white/10">Import</Button>
-                                        </div>
+
+                                        <Dialog open={isExportDialogOpen} onOpenChange={setIsExportDialogOpen}>
+                                            <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[500px]">
+                                                <DialogHeader>
+                                                    <DialogTitle>Export Vault</DialogTitle>
+                                                    <DialogDescription className="text-neutral-400">
+                                                        Download an encrypted backup of your vault.
+                                                    </DialogDescription>
+                                                </DialogHeader>
+
+                                                {exportStep === 'warning' && (
+                                                    <div className="space-y-4 py-4">
+                                                        <div className="flex items-start gap-3 p-3 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-200 text-sm">
+                                                            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <span className="font-bold">Warning:</span> Ideally, you should store this file on an offline storage device (like a USB drive). Anyone with this file and your Master Password can access your data.
+                                                            </div>
+                                                        </div>
+                                                        <DialogFooter>
+                                                            <Button variant="ghost" onClick={() => setIsExportDialogOpen(false)}>Cancel</Button>
+                                                            <Button onClick={() => setExportStep('verify')}>I Understand, Continue</Button>
+                                                        </DialogFooter>
+                                                    </div>
+                                                )}
+
+                                                {exportStep === 'verify' && (
+                                                    <div className="space-y-4 py-4">
+                                                        <div className="space-y-2">
+                                                            <Label>Verify Master Password</Label>
+                                                            <Input
+                                                                type="password"
+                                                                value={exportMasterPassword}
+                                                                onChange={(e) => setExportMasterPassword(e.target.value)}
+                                                                className="bg-zinc-900 border-white/10"
+                                                                autoFocus
+                                                            />
+                                                        </div>
+                                                        <DialogFooter>
+                                                            <Button variant="ghost" onClick={() => setExportStep('warning')}>Back</Button>
+                                                            <Button onClick={handleExportVerify}>Verify & Download</Button>
+                                                        </DialogFooter>
+                                                    </div>
+                                                )}
+
+                                                {exportStep === 'processing' && (
+                                                    <div className="py-8 flex flex-col items-center justify-center space-y-4">
+                                                        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                                                        <p className="text-neutral-400">Encrypting vault data...</p>
+                                                        <div className="text-xs text-neutral-500">Do not close this window</div>
+                                                    </div>
+                                                )}
+                                            </DialogContent>
+                                        </Dialog>
                                     </div>
                                 </div>
 
@@ -882,7 +1266,6 @@ export default function SettingsPage() {
                                 </div>
                             </div>
                         </div>
-
                         {/* Security Activity */}
                         <div className="space-y-4">
                             <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wider pl-1">Security Activity</h2>
@@ -927,7 +1310,8 @@ export default function SettingsPage() {
                                         'recovery_codes_generated',
                                         'recovery_codes_regenerated',
                                         'vault_export',
-                                        'vault_import'
+                                        'vault_import_appended',
+                                        'vault_import_replaced'
                                     ];
 
                                     const filteredActivities = activities
@@ -1036,7 +1420,7 @@ export default function SettingsPage() {
                                                                     <h4 className="text-sm font-medium text-blue-500">Export Your Vault First</h4>
                                                                     <p className="text-sm text-blue-400/90">
                                                                         We recommend exporting your vault data before deletion.
-                                                                        Go to Settings → Export Vault to download an encrypted backup.
+                                                                        Go to Settings â†’ Export Vault to download an encrypted backup.
                                                                     </p>
                                                                 </div>
                                                             </div>
@@ -1155,6 +1539,6 @@ export default function SettingsPage() {
                     </div>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

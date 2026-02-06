@@ -349,3 +349,129 @@ export async function verifyRecoveryCodeAndGetVaultKey(
         return null;
     }
 }
+
+/**
+ * Export vault data as encrypted JSON
+ * 
+ * Logic:
+ * 1. Generate new random salt
+ * 2. Derive key from password + salt
+ * 3. Encrypt the whole JSON payload
+ * 4. Return structured export format
+ */
+export async function exportVault(items: any[], password: string): Promise<string> {
+    // 1. Generate salt
+    const salt = generateSalt();
+
+    // 2. Derive key
+    const masterKey = await deriveMasterKey(password, salt);
+
+    // 3. Encrypt data
+    const encoder = new TextEncoder();
+    const data = encoder.encode(JSON.stringify(items));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+
+    const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        masterKey,
+        data
+    );
+
+    // Combine IV + encrypted data
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+
+    // Convert to hex
+    const ciphertext = Array.from(combined, byte => byte.toString(16).padStart(2, '0')).join('');
+
+    // 4. Construct export object
+    const exportData = {
+        format: "aegis-encrypted-vault",
+        version: 1,
+        createdAt: new Date().toISOString(),
+        kdf: {
+            algorithm: "PBKDF2",
+            salt: salt,
+            params: {
+                iterations: 100000,
+                hash: "SHA-256"
+            }
+        },
+        encryption: {
+            algorithm: "AES-256-GCM",
+            iv_included: true // IV is prefixed to ciphertext
+        },
+        ciphertext: ciphertext
+    };
+
+    return JSON.stringify(exportData, null, 2);
+}
+
+/**
+ * Import and decrypt vault from JSON
+ */
+export async function importVault(jsonString: string, password: string): Promise<any[]> {
+    try {
+        const data = JSON.parse(jsonString);
+
+        // Validate format
+        if (data.format !== "aegis-encrypted-vault" || !data.ciphertext || !data.kdf) {
+            throw new Error("Invalid vault format");
+        }
+
+        // 1. Derive key using file's KDF params
+        const salt = data.kdf.salt;
+        const iterations = data.kdf.params.iterations;
+        const hash = data.kdf.params.hash;
+
+        const encoder = new TextEncoder();
+        const passwordBuffer = encoder.encode(password);
+        const keyMaterial = await crypto.subtle.importKey(
+            'raw',
+            passwordBuffer,
+            'PBKDF2',
+            false,
+            ['deriveKey']
+        );
+
+        const saltBuffer = new Uint8Array(salt.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+
+        const masterKey = await crypto.subtle.deriveKey(
+            {
+                name: 'PBKDF2',
+                salt: saltBuffer,
+                iterations: iterations,
+                hash: hash
+            },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['decrypt']
+        );
+
+        // 2. Decrypt
+        const encryptedHex = data.ciphertext;
+        const combined = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+
+        // Extract IV (first 12 bytes)
+        const iv = combined.slice(0, 12);
+        const ciphertext = combined.slice(12);
+
+        const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            masterKey,
+            ciphertext
+        );
+
+        // 3. Parse result
+        const decoder = new TextDecoder();
+        const decryptedJson = decoder.decode(decrypted);
+        return JSON.parse(decryptedJson);
+
+    } catch (error) {
+        console.error("Import failed:", error);
+        throw new Error("Decryption failed. Wrong password or corrupted file.");
+    }
+}
+

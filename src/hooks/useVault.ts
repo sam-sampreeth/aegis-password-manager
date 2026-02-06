@@ -252,6 +252,71 @@ export function useVaultItems() {
         }
     };
 
+    /**
+     * Batch import items
+     */
+    const importItems = async (newItems: any[]) => {
+        if (!user) return;
+        try {
+            // Transform items to DB format
+            const payload = newItems.map(item => {
+                const encryptedBlob = packItemBlob(item);
+                return {
+                    user_id: user.id,
+                    name: item.name || "Untitled",
+                    category: item.category || "Other",
+                    tags: item.tags || [],
+                    favorite: item.favorite || false,
+                    strength_score: Math.min(item.strength || 0, 4),
+                    encrypted_blob: encryptedBlob,
+                    created_at: item.createdAt || new Date().toISOString(),
+                    updated_at: item.updatedAt || new Date().toISOString(),
+                    has_totp: !!item.totpSecret,
+                    encryption_version: 1,
+                    modified_count: 0
+                };
+            });
+
+            // Supabase batch insert
+            // @ts-ignore
+            const { data, error } = await supabase
+                .from('vault_items')
+                .insert(payload as any)
+                .select();
+
+            if (error) throw error;
+
+            // Update local state
+            const imported = (data || []).map(parseItem);
+            setItems(prev => [...imported, ...prev]);
+
+            return imported.length;
+        } catch (err: any) {
+            console.error("Import error:", err);
+            throw err;
+        }
+    };
+
+    /**
+     * Clear all vault items (Destructive!)
+     */
+    const clearVault = async () => {
+        if (!user) return;
+        try {
+            // Delete all items for user
+            const { error } = await supabase
+                .from('vault_items')
+                .delete()
+                .eq('user_id', user.id);
+
+            if (error) throw error;
+            setItems([]);
+        } catch (err: any) {
+            console.error("Clear vault error:", err);
+            throw err;
+        }
+    };
+
     const deleteItem = async (id: string) => {
         if (!user) return;
         const item = items.find(i => i.id === id);
@@ -288,7 +353,7 @@ export function useVaultItems() {
         }
     };
 
-    return { items, loading, error, fetchItems, addItem, updateItem, deleteItem };
+    return { items, loading, error, fetchItems, addItem, updateItem, deleteItem, importItems, clearVault };
 }
 
 export function useVaultTrash() {

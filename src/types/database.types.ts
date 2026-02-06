@@ -49,6 +49,8 @@ export interface Database {
                     notify_password_reminders: boolean | null
                     username_presets: string[] | null
                     encrypted_recovery_codes: string | null
+                    encrypted_vault_key: string | null
+                    vault_key_salt: string | null
                     created_at: string
                     updated_at: string
                 }
@@ -62,6 +64,8 @@ export interface Database {
                     notify_password_reminders?: boolean | null
                     username_presets?: string[] | null
                     encrypted_recovery_codes?: string | null
+                    encrypted_vault_key?: string | null
+                    vault_key_salt?: string | null
                     created_at?: string
                     updated_at?: string
                 }
@@ -75,6 +79,8 @@ export interface Database {
                     notify_password_reminders?: boolean | null
                     username_presets?: string[] | null
                     encrypted_recovery_codes?: string | null
+                    encrypted_vault_key?: string | null
+                    vault_key_salt?: string | null
                     created_at?: string
                     updated_at?: string
                 }
