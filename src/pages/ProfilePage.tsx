@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabase";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -22,48 +23,104 @@ import {
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useLock } from "@/context/LockContext";
+import { useProfile } from "@/hooks/useProfiles";
+import { useAuth } from "@/context/AuthContext";
+import { useEffect } from "react";
 
 export default function ProfilePage() {
     const navigate = useNavigate();
     const { isLocked, lockVault } = useLock();
+    const { user, signOut } = useAuth();
+    const { profile: dbProfile, loading, updateProfile } = useProfile();
     const [isEditing, setIsEditing] = useState(false);
 
-    // Mock Data State
-    const [profile, setProfile] = useState({
-        displayName: "Sampreeth",
-        username: "sam_dev",
-        email: "sam@example.com",
-        jobTitle: "Software Engineer",
-        location: "San Francisco, CA"
-    });
+    // Temp state for editing
+    const [tempDisplayName, setTempDisplayName] = useState("");
+    const [tempUsername, setTempUsername] = useState("");
 
-    const [tempProfile, setTempProfile] = useState(profile);
+    // Sync DB profile to temp state when loaded or editing starts
+    useEffect(() => {
+        if (dbProfile) {
+            setTempDisplayName(dbProfile.display_name || "");
+            setTempUsername(dbProfile.username || "");
+        }
+    }, [dbProfile, isEditing]);
 
-    const handleSave = () => {
-        setProfile(tempProfile);
-        setIsEditing(false);
-        toast.success("Profile updated successfully");
+    const handleSave = async () => {
+        try {
+            await updateProfile({
+                display_name: tempDisplayName,
+                username: tempUsername
+            });
+            setIsEditing(false);
+            toast.success("Profile updated successfully");
+        } catch (error) {
+            toast.error("Failed to update profile");
+            console.error(error);
+        }
     };
 
     const handleCancel = () => {
-        setTempProfile(profile);
+        if (dbProfile) {
+            setTempDisplayName(dbProfile.display_name || "");
+            setTempUsername(dbProfile.username || "");
+        }
         setIsEditing(false);
     };
 
-    const handleLogout = () => {
-        // In a real app, clear auth tokens here
-        toast.promise(
-            new Promise((resolve) => setTimeout(resolve, 1000)),
-            {
-                loading: 'Logging out...',
-                success: () => {
-                    navigate("/auth");
-                    return "Logged out successfully";
-                },
-                error: 'Error logging out'
-            }
-        );
+    const handleCreateProfile = async () => {
+        if (!user) return;
+        try {
+            const { error } = await supabase.from('profiles').upsert({
+                id: user.id,
+                username: user.email?.split('@')[0] || 'user',
+                display_name: 'New User',
+            });
+
+            if (error) throw error;
+            toast.success("Profile created successfully! refresh the page.");
+            window.location.reload();
+        } catch (error: any) {
+            toast.error("Failed to create profile: " + error.message);
+        }
     };
+
+    const handleLogout = async () => {
+        try {
+            await signOut();
+            navigate("/auth");
+            toast.success("Logged out successfully");
+        } catch (error) {
+            toast.error("Error logging out");
+        }
+    };
+
+    if (loading) {
+        return <div className="p-12 text-center text-white">Loading profile...</div>;
+    }
+
+    if (!dbProfile && user) {
+        return (
+            <div className="flex-1 h-screen flex items-center justify-center bg-black text-white p-6">
+                <div className="text-center space-y-4">
+                    <h2 className="text-xl font-bold">Profile Not Found</h2>
+                    <p className="text-neutral-400">It seems your user account exists but the profile data is missing.</p>
+                    <Button onClick={handleCreateProfile}>Create Missing Profile</Button>
+                </div>
+            </div>
+        );
+    }
+
+    const displayProfile = {
+        displayName: dbProfile?.display_name || "User",
+        username: dbProfile?.username || "user",
+        email: user?.email || "No Email",
+        // These fields are not in the DB schema provided, so placeholders for now or remove if strictly adhering.
+        // Keeping structure compatible with UI but static.
+        jobTitle: "Software Engineer",
+        location: "San Francisco, CA"
+    };
+
 
     const sessions = [
         {
@@ -100,11 +157,11 @@ export default function ProfilePage() {
                             </div>
                         </div>
                         <div className="space-y-1">
-                            <h1 className="text-3xl font-bold">{profile.displayName}</h1>
+                            <h1 className="text-3xl font-bold">{displayProfile.displayName}</h1>
                             <div className="flex items-center gap-2 text-neutral-400">
-                                <span>@{profile.username}</span>
+                                <span>@{displayProfile.username}</span>
                                 <span>•</span>
-                                <span>{profile.email}</span>
+                                <span>{displayProfile.email}</span>
                             </div>
                             <div className="flex gap-2 mt-2">
                                 <Badge variant="secondary" className="bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20">
@@ -151,8 +208,8 @@ export default function ProfilePage() {
                                     <div className="space-y-2">
                                         <Label>Display Name</Label>
                                         <Input
-                                            value={tempProfile.displayName}
-                                            onChange={(e) => setTempProfile({ ...tempProfile, displayName: e.target.value })}
+                                            value={tempDisplayName}
+                                            onChange={(e) => setTempDisplayName(e.target.value)}
                                             disabled={!isEditing}
                                             className="bg-zinc-950/50 border-white/10 disabled:opacity-100"
                                         />
@@ -162,8 +219,8 @@ export default function ProfilePage() {
                                         <div className="relative">
                                             <span className="absolute left-3 top-2.5 text-neutral-500">@</span>
                                             <Input
-                                                value={tempProfile.username}
-                                                onChange={(e) => setTempProfile({ ...tempProfile, username: e.target.value })}
+                                                value={tempUsername}
+                                                onChange={(e) => setTempUsername(e.target.value)}
                                                 disabled={!isEditing}
                                                 className="bg-zinc-950/50 border-white/10 pl-7 disabled:opacity-100"
                                             />
@@ -173,7 +230,7 @@ export default function ProfilePage() {
                                         <Label>Email Address</Label>
                                         <div className="flex gap-2">
                                             <Input
-                                                value={profile.email}
+                                                value={displayProfile.email}
                                                 disabled
                                                 className="bg-zinc-950/30 border-white/5 text-neutral-500"
                                             />
