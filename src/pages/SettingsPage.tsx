@@ -31,7 +31,7 @@ import { useVaultActivity } from "@/hooks/useVaultActivity";
 import { useUserSettings } from "@/hooks/useProfiles";
 import { useVaultItems } from "@/hooks/useVault";
 import { supabase } from "@/lib/supabase";
-import { deriveMasterKey, decryptVaultKey, generateRecoveryCodeData, exportVault, importVault } from "@/lib/crypto";
+import { deriveMasterKey, decryptVaultKey, generateRecoveryCodeData, exportVault, importVault, generateSalt, encryptVaultKey } from "@/lib/crypto";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -102,6 +102,16 @@ export default function SettingsPage() {
     const [decryptedImportItems, setDecryptedImportItems] = useState<any[]>([]);
     const [importStats, setImportStats] = useState({ total: 0, duplicates: 0 });
     const [importConfirmText, setImportConfirmText] = useState("");
+
+    // Change Master Password State
+    const [isChangeMasterPasswordOpen, setIsChangeMasterPasswordOpen] = useState(false);
+    const [changeMasterPasswordStep, setChangeMasterPasswordStep] = useState<'verify' | 'new' | 'processing' | 'success'>('verify');
+    const [currentMasterPassword, setCurrentMasterPassword] = useState("");
+    const [newMasterPassword, setNewMasterPassword] = useState("");
+    const [confirmNewMasterPassword, setConfirmNewMasterPassword] = useState("");
+
+    const [changeMasterPasswordError, setChangeMasterPasswordError] = useState("");
+    const [isChangePasswordLoading, setIsChangePasswordLoading] = useState(false);
 
     // MFA State
     const [mfaEnabled, setMfaEnabled] = useState(false);
@@ -1000,6 +1010,201 @@ export default function SettingsPage() {
                                         </AlertDialogContent>
                                     </AlertDialog>
 
+                                    {/* Action: Change Master Password */}
+                                    <div className="flex items-center justify-between p-4 rounded-lg bg-zinc-950/50 border border-white/5">
+                                        <div className="space-y-1">
+                                            <div className="font-medium text-white">Master Password</div>
+                                            <div className="text-sm text-neutral-500">Change the password used to encrypt your vault</div>
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setIsChangeMasterPasswordOpen(true);
+                                                setChangeMasterPasswordStep('verify');
+                                                setCurrentMasterPassword("");
+                                                setNewMasterPassword("");
+                                                setConfirmNewMasterPassword("");
+                                                setChangeMasterPasswordError("");
+                                            }}
+                                            className="border-white/10 hover:bg-zinc-800"
+                                        >
+                                            Change Password
+                                        </Button>
+                                    </div>
+
+                                    {/* Change Master Password Dialog */}
+                                    <Dialog open={isChangeMasterPasswordOpen} onOpenChange={setIsChangeMasterPasswordOpen}>
+                                        <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[500px]">
+                                            <DialogHeader>
+                                                <DialogTitle>Change Master Password</DialogTitle>
+                                                <DialogDescription className="text-neutral-400">
+                                                    Update your master password. This will re-encrypt your vault key.
+                                                </DialogDescription>
+                                            </DialogHeader>
+
+                                            {changeMasterPasswordStep === 'verify' && (
+                                                <div className="space-y-4 py-4">
+                                                    <div className="space-y-2">
+                                                        <Label>Current Master Password</Label>
+                                                        <Input
+                                                            type="password"
+                                                            value={currentMasterPassword}
+                                                            onChange={(e) => {
+                                                                setCurrentMasterPassword(e.target.value);
+                                                                setChangeMasterPasswordError("");
+                                                            }}
+                                                            className="bg-zinc-900 border-white/10"
+                                                            autoFocus
+                                                        />
+                                                        {changeMasterPasswordError && <p className="text-xs text-red-500">{changeMasterPasswordError}</p>}
+                                                    </div>
+                                                    <DialogFooter>
+                                                        <Button variant="ghost" onClick={() => setIsChangeMasterPasswordOpen(false)}>Cancel</Button>
+                                                        <Button
+                                                            onClick={async () => {
+                                                                if (!settings?.encrypted_vault_key || !settings?.vault_key_salt) {
+                                                                    setChangeMasterPasswordError("Vault settings not found.");
+                                                                    return;
+                                                                }
+                                                                setIsChangePasswordLoading(true);
+                                                                try {
+                                                                    // Verify current password
+                                                                    const derivedKey = await deriveMasterKey(currentMasterPassword, settings.vault_key_salt);
+                                                                    const vaultKey = await decryptVaultKey(settings.encrypted_vault_key, derivedKey);
+
+                                                                    if (vaultKey) {
+                                                                        setChangeMasterPasswordStep('new');
+                                                                    } else {
+                                                                        setChangeMasterPasswordError("Incorrect master password");
+                                                                    }
+                                                                } catch (err) {
+                                                                    setChangeMasterPasswordError("Verification failed");
+                                                                } finally {
+                                                                    setIsChangePasswordLoading(false);
+                                                                }
+                                                            }}
+                                                            disabled={!currentMasterPassword || isChangePasswordLoading}
+                                                        >
+                                                            {isChangePasswordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify & Continue"}
+                                                        </Button>
+                                                    </DialogFooter>
+                                                </div>
+                                            )}
+
+                                            {changeMasterPasswordStep === 'new' && (
+                                                <div className="space-y-4 py-4">
+                                                    <div className="space-y-2">
+                                                        <Label>New Master Password</Label>
+                                                        <Input
+                                                            type="password"
+                                                            value={newMasterPassword}
+                                                            onChange={(e) => setNewMasterPassword(e.target.value)}
+                                                            className="bg-zinc-900 border-white/10"
+                                                            autoFocus
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label>Confirm New Password</Label>
+                                                        <Input
+                                                            type="password"
+                                                            value={confirmNewMasterPassword}
+                                                            onChange={(e) => setConfirmNewMasterPassword(e.target.value)}
+                                                            className="bg-zinc-900 border-white/10"
+                                                        />
+                                                    </div>
+                                                    <ul className="text-xs text-neutral-500 space-y-1 list-disc pl-4">
+                                                        <li className={newMasterPassword.length >= 8 ? "text-green-500" : ""}>At least 8 characters</li>
+                                                        <li className={newMasterPassword && newMasterPassword === confirmNewMasterPassword ? "text-green-500" : ""}>Passwords match</li>
+                                                    </ul>
+                                                    <DialogFooter>
+                                                        <Button variant="ghost" onClick={() => setChangeMasterPasswordStep('verify')}>Back</Button>
+                                                        <Button
+                                                            onClick={async () => {
+                                                                if (newMasterPassword !== confirmNewMasterPassword) {
+                                                                    toast.error("New passwords do not match.");
+                                                                    return;
+                                                                }
+                                                                if (newMasterPassword.length < 8) {
+                                                                    toast.error("New master password must be at least 8 characters.");
+                                                                    return;
+                                                                }
+
+                                                                setChangeMasterPasswordStep('processing');
+                                                                try {
+                                                                    const { data: { user } } = await supabase.auth.getUser();
+                                                                    if (!user) throw new Error("User not authenticated.");
+
+                                                                    // 1. Decrypt vault key with OLD password (we know it's valid from step 1)
+                                                                    if (!settings?.encrypted_vault_key || !settings?.vault_key_salt) throw new Error("Missing vault settings");
+                                                                    const oldKey = await deriveMasterKey(currentMasterPassword, settings.vault_key_salt);
+                                                                    const vaultKey = await decryptVaultKey(settings.encrypted_vault_key, oldKey);
+
+                                                                    if (!vaultKey) throw new Error("Critical: Failed to decrypt vault key during rotation");
+
+                                                                    // 2. Generate NEW salt and encrypt vault key with NEW password
+                                                                    const newSalt = generateSalt();
+                                                                    const newMasterKey = await deriveMasterKey(newMasterPassword, newSalt);
+                                                                    const newEncryptedVaultKey = await encryptVaultKey(vaultKey, newMasterKey);
+
+                                                                    // 3. Update Supabase
+                                                                    const { error } = await supabase
+                                                                        .from('user_settings')
+                                                                        .update({
+                                                                            encrypted_vault_key: newEncryptedVaultKey,
+                                                                            vault_key_salt: newSalt
+                                                                        })
+                                                                        .eq('user_id', user!.id);
+
+                                                                    if (error) throw error;
+
+                                                                    // 4. Log Activity
+                                                                    await logActivity('master_password_change', { method: 'settings_reset' });
+
+                                                                    setChangeMasterPasswordStep('success');
+                                                                    toast.success("Master password updated successfully");
+
+                                                                } catch (err: any) {
+                                                                    console.error("Failed to update master password:", err);
+                                                                    toast.error("Failed to update password: " + err.message);
+                                                                    setChangeMasterPasswordStep('new'); // Go back
+                                                                }
+                                                            }}
+                                                            disabled={!newMasterPassword || newMasterPassword !== confirmNewMasterPassword || newMasterPassword.length < 8}
+                                                        >
+                                                            Update Password
+                                                        </Button>
+                                                    </DialogFooter>
+                                                </div>
+                                            )}
+
+                                            {changeMasterPasswordStep === 'processing' && (
+                                                <div className="py-8 flex flex-col items-center justify-center space-y-4">
+                                                    <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                                                    <p className="text-neutral-400">Re-encrypting vault key...</p>
+                                                    <div className="text-xs text-neutral-500">Do not close this window</div>
+                                                </div>
+                                            )}
+
+                                            {changeMasterPasswordStep === 'success' && (
+                                                <div className="space-y-4 py-4 text-center">
+                                                    <div className="mx-auto w-12 h-12 bg-green-500/10 rounded-full flex items-center justify-center mb-4">
+                                                        <Check className="w-6 h-6 text-green-500" />
+                                                    </div>
+                                                    <h3 className="text-lg font-medium text-white">Password Updated</h3>
+                                                    <p className="text-sm text-neutral-400">
+                                                        Your master password has been changed successfully. Please use your new password for all future logins.
+                                                    </p>
+                                                    <DialogFooter className="justify-center sm:justify-center">
+                                                        <Button onClick={() => setIsChangeMasterPasswordOpen(false)} className="w-full sm:w-auto">
+                                                            Close
+                                                        </Button>
+                                                    </DialogFooter>
+                                                </div>
+                                            )}
+                                        </DialogContent>
+                                    </Dialog>
+
                                     {/* Recovery Codes Display Dialog */}
                                     <Dialog open={newRecoveryCodes !== null} onOpenChange={(open) => !open && setNewRecoveryCodes(null)}>
                                         <DialogContent className="bg-zinc-950 border-white/10 text-white max-w-2xl">
@@ -1088,11 +1293,7 @@ export default function SettingsPage() {
                                         </div>
                                     </div>
 
-                                    {mfaEnabled && (
-                                        <Button variant="outline" size="sm" className="w-full border-white/10 text-neutral-300 hover:text-white hover:bg-zinc-800">
-                                            View MFA Backup Codes
-                                        </Button>
-                                    )}
+
                                 </div>
                             </div>
                         </div>
@@ -1773,10 +1974,10 @@ export default function SettingsPage() {
                                             <div
                                                 key={i}
                                                 className={`w-12 h-14 rounded-lg border flex items-center justify-center text-2xl font-mono transition-all ${mfaCode[i]
-                                                        ? "border-primary bg-primary/10 text-primary" // Filled state
-                                                        : i === mfaCode.length
-                                                            ? "border-primary/50 bg-zinc-900 shadow-[0_0_0_1px_rgba(168,85,247,0.4)]" // Active/Focused state
-                                                            : "border-white/10 bg-zinc-900 text-neutral-500" // Empty state
+                                                    ? "border-primary bg-primary/10 text-primary" // Filled state
+                                                    : i === mfaCode.length
+                                                        ? "border-primary/50 bg-zinc-900 shadow-[0_0_0_1px_rgba(168,85,247,0.4)]" // Active/Focused state
+                                                        : "border-white/10 bg-zinc-900 text-neutral-500" // Empty state
                                                     }`}
                                             >
                                                 {mfaCode[i] || ""}
