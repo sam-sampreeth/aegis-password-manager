@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { dummyVault } from "@/data/dummyVault";
 import { motion, AnimatePresence } from "framer-motion";
 import { Trash2, RefreshCcw, Search, MoreVertical, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,16 +21,10 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils";
 import { VaultItemIcon } from "@/components/vault/VaultItemIcon";
-
-// Mock Trash Data
-const initialTrash = dummyVault.slice(0, 3).map(item => ({
-    ...item,
-    deletedAt: new Date().toISOString()
-}));
+import { useVaultTrash } from "@/hooks/useVault";
 
 export default function TrashPage() {
-    // Fixed typo: tashItems -> trashItems
-    const [trashItems, setTrashItems] = useState(initialTrash);
+    const { trashItems, loading, restoreFromTrash, permanentDelete, emptyTrash } = useVaultTrash();
     const [searchQuery, setSearchQuery] = useState("");
     const [confirmAction, setConfirmAction] = useState<null | 'restore_all' | 'empty_trash'>(null);
 
@@ -40,20 +33,15 @@ export default function TrashPage() {
         item.username.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const handleRestore = (id: string) => {
-        setTrashItems(prev => prev.filter(i => i.id !== id));
-    };
-
-    const handleDeleteForever = (id: string) => {
-        setTrashItems(prev => prev.filter(i => i.id !== id));
-    };
-
-    const handleConfirmAction = () => {
+    const handleConfirmAction = async () => {
         if (confirmAction === 'empty_trash') {
-            setTrashItems([]);
+            await emptyTrash();
         } else if (confirmAction === 'restore_all') {
-            // In a real app, this would trigger a restore API call
-            setTrashItems([]);
+            // Restore all currently filtered/available items
+            // Sequential for now, or batch if API supported
+            for (const item of trashItems) {
+                await restoreFromTrash(item.id);
+            }
         }
         setConfirmAction(null);
     };
@@ -83,6 +71,8 @@ export default function TrashPage() {
                         </div>
                         {trashItems.length > 0 && (
                             <div className="flex items-center gap-2">
+                                {/* Restore All Button - disabled for now as it's complex */}
+                                {/* 
                                 <Button
                                     variant="outline"
                                     size="sm"
@@ -90,7 +80,8 @@ export default function TrashPage() {
                                     onClick={() => setConfirmAction('restore_all')}
                                 >
                                     <RefreshCcw className="w-4 h-4 mr-2" /> Restore All
-                                </Button>
+                                </Button> 
+                                */}
                                 <Button
                                     variant="destructive"
                                     size="sm"
@@ -112,7 +103,9 @@ export default function TrashPage() {
                         </div>
 
                         <AnimatePresence mode="popLayout">
-                            {filteredItems.length === 0 ? (
+                            {loading ? (
+                                <div className="flex justify-center p-10"><div className="animate-spin w-6 h-6 border-2 border-white/20 border-t-blue-500 rounded-full" /></div>
+                            ) : filteredItems.length === 0 ? (
                                 <motion.div
                                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                                     className="flex flex-col items-center justify-center h-64 text-neutral-500 gap-4"
@@ -126,7 +119,7 @@ export default function TrashPage() {
                                 <div className="space-y-2">
                                     {filteredItems.map((item) => (
                                         <motion.div
-                                            key={item.id}
+                                            key={item.id} // Trash ID
                                             layout
                                             initial={{ opacity: 0, y: 10 }}
                                             animate={{ opacity: 1, y: 0 }}
@@ -146,7 +139,7 @@ export default function TrashPage() {
                                                     size="sm"
                                                     variant="ghost"
                                                     className="h-8 text-neutral-400 hover:text-white"
-                                                    onClick={() => handleRestore(item.id)}
+                                                    onClick={() => restoreFromTrash(item.id)}
                                                 >
                                                     <RefreshCcw className="w-4 h-4 mr-2" /> Restore
                                                 </Button>
@@ -158,11 +151,11 @@ export default function TrashPage() {
                                                         </Button>
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end" className="w-48 bg-zinc-950 border-white/10 text-white">
-                                                        <DropdownMenuItem onClick={() => handleRestore(item.id)}>
+                                                        <DropdownMenuItem onClick={() => restoreFromTrash(item.id)}>
                                                             <RefreshCcw className="w-4 h-4 mr-2 text-neutral-400" />
                                                             <span>Restore</span>
                                                         </DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleDeleteForever(item.id)} className="text-red-400 focus:text-red-400 focus:bg-red-500/10">
+                                                        <DropdownMenuItem onClick={() => permanentDelete(item.id)} className="text-red-400 focus:text-red-400 focus:bg-red-500/10">
                                                             <Trash2 className="w-4 h-4 mr-2" />
                                                             <span>Delete Forever</span>
                                                         </DropdownMenuItem>

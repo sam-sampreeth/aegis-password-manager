@@ -11,6 +11,7 @@ import TrashPage from "./pages/TrashPage"
 import SettingsPage from "./pages/SettingsPage"
 import NotificationsPage from "./pages/NotificationsPage"
 import { DashboardLayout } from "./layouts/DashboardLayout"
+import { Toaster } from "@/components/ui/sonner"
 
 function App() {
   return (
@@ -38,6 +39,7 @@ function App() {
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Routes>
+      <Toaster />
     </BrowserRouter>
   )
 }

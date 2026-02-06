@@ -1,19 +1,22 @@
 import { useMemo } from "react";
-import { dummyVault } from "@/data/dummyVault";
 import { motion } from "framer-motion";
 import { ShieldAlert, RefreshCcw, Clock, ArrowRight, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useNavigate } from "react-router-dom";
 import { VaultItemIcon } from "@/components/vault/VaultItemIcon";
+import { useVaultItems } from "@/hooks/useVault";
 
 export default function ActionCenterPage() {
+    const navigate = useNavigate();
+    const { items } = useVaultItems();
     // Analytics Logic
     const stats = useMemo(() => {
-        const weak = dummyVault.filter(i => i.strength < 3);
-        const reused = dummyVault.filter((item, index, self) =>
+        const weak = items.filter(i => i.strength < 3);
+        const reused = items.filter((item, index, self) =>
             self.findIndex(t => t.password === item.password) !== index
         );
-        const old = dummyVault.filter(i => {
+        const old = items.filter(i => {
             const lastUpdate = new Date(i.updatedAt);
             const sixMonthsAgo = new Date();
             sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -22,10 +25,10 @@ export default function ActionCenterPage() {
 
         // Strength Distribution
         const strengthDist = [0, 0, 0, 0, 0];
-        dummyVault.forEach(i => strengthDist[i.strength]++);
+        items.forEach(i => strengthDist[Math.min(i.strength, 4)]++); // Safe index access
 
         return { weak, reused, old, strengthDist };
-    }, []);
+    }, [items]);
 
     const maxCount = Math.max(...stats.strengthDist);
 
@@ -150,7 +153,12 @@ export default function ActionCenterPage() {
                                                         <div className="text-xs text-neutral-500">{item.username}</div>
                                                     </div>
                                                 </div>
-                                                <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-2 h-8">
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-2 h-8"
+                                                    onClick={() => navigate(`/vault?openId=${item.id}`)}
+                                                >
                                                     Fix <ArrowRight className="w-3 h-3" />
                                                 </Button>
                                             </div>

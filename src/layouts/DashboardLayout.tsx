@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
-import { Toaster } from "@/components/ui/sonner";
 import { Link, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -12,13 +11,13 @@ import {
     ShieldAlert,
     Sparkles,
     Trash2,
-    Lock,
     LockKeyhole,
     Bell
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LockProvider, useLock } from "@/context/LockContext";
 import { LockScreen } from "@/components/vault/LockScreen";
+import { useAuth } from "@/context/AuthContext";
 
 export function DashboardLayout() {
     return (
@@ -31,10 +30,25 @@ export function DashboardLayout() {
 function DashboardContent() {
     const [open, setOpen] = useState(false);
     const { isLocked, lockVault } = useLock();
+    const { user, loading: authLoading, signOut } = useAuth();
     const [isSecuring, setIsSecuring] = useState(false);
     const [securingType, setSecuringType] = useState<"lock" | "logout" | null>(null);
     const navigate = useNavigate();
     const location = useLocation();
+
+    useEffect(() => {
+        if (!authLoading && !user) {
+            navigate("/auth");
+        }
+    }, [authLoading, user, navigate]);
+
+    if (authLoading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-zinc-950 text-white">
+                <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+            </div>
+        );
+    }
 
     // Determine if the current route requires a lock
     // Safe routes: Settings, Generator, Profile
@@ -57,13 +71,14 @@ function DashboardContent() {
         setIsSecuring(true);
         setSecuringType(type);
 
-        setTimeout(() => {
+        setTimeout(async () => {
             setIsSecuring(false);
             setSecuringType(null);
 
             if (type === "lock") {
                 lockVault("manual");
             } else {
+                await signOut();
                 navigate("/auth");
             }
         }, 1500);
@@ -205,7 +220,7 @@ function DashboardContent() {
                 ) : (
                     <Outlet />
                 )}
-                <Toaster />
+
             </div>
         </div>
     );
