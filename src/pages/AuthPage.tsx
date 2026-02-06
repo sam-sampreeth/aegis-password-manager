@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import DecryptedText from "@/components/reactbits/DecryptedText"
 import { motion } from "framer-motion"
-import { Github } from "lucide-react"
+import { Github, Eye, EyeOff } from "lucide-react"
 import { Meteors } from "@/components/ui/meteors"
 import { useLocation, Link, useNavigate } from "react-router-dom"
 import { SignUpWizard } from "@/components/auth/SignUpWizard"
@@ -20,36 +21,70 @@ export default function AuthPage() {
     const isForgot = location.pathname.includes("/forgot-password");
     const isLogin = !isSignup && !isForgot;
 
-    // If starting with OAuth (simulated), we skip credentials and go to profile
-    const [oauthStart, setOauthStart] = useState(false);
+    // Check if user is already logged in
+    useEffect(() => {
+        const checkAuth = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+                toast.info("You're already logged in", {
+                    className: "!bg-blue-600 !text-white !border-blue-500 font-medium"
+                });
+                navigate("/vault");
+            }
+        };
+        checkAuth();
+    }, [navigate]);
 
-    const handleGithubLogin = () => {
-        // Simulation of OAuth callback
-        toast.info("Simulating GitHub OAuth...");
-        setTimeout(() => {
-            setOauthStart(true);
-            navigate("/auth/signup");
-        }, 800);
+    // If starting with OAuth (simulated), we skip credentials and go to profile
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [shake, setShake] = useState(false);
+
+    const handleGithubLogin = async () => {
+        try {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: 'github',
+            });
+            if (error) throw error;
+        } catch (error: any) {
+            toast.error(error.message);
+        }
     };
 
-    const handleLogin = () => {
-        // Simple login simulation
-        toast.success("Welcome back!");
-        navigate("/vault");
+    const handleLogin = async () => {
+        try {
+            setLoading(true);
+            const { error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+            if (error) throw error;
+
+            toast.success("Welcome back!");
+            navigate("/vault");
+        } catch (error: any) {
+            setShake(true);
+            setTimeout(() => setShake(false), 500);
+            toast.error(error.message || "Failed to sign in", {
+                className: "!bg-red-600 !text-white !border-red-500 font-medium"
+            });
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
         <div className="flex min-h-screen w-full">
-            {/* Left Side - Visuals */}
+            {/* ... checks out ... */}
+            {/* Left Side omitted for brevity, logic remains same */}
             <div className="hidden lg:flex w-1/2 bg-zinc-950 relative items-center justify-center overflow-hidden">
-                {/* Meteors */}
                 <div className="absolute inset-0 h-full w-full">
                     <Meteors number={40} />
                 </div>
-
-                {/* Radial Gradient Accent */}
                 <div className="absolute left-0 top-0 h-[500px] w-[500px] -translate-x-[30%] -translate-y-[20%] rounded-full bg-blue-500/20 blur-[100px]"></div>
-
                 <div className="px-8 md:px-20 w-full relative z-20">
                     <h1 className="text-4xl md:text-5xl font-bold text-white max-w-lg leading-relaxed lg:leading-snug">
                         Secure your digital life with{" "}
@@ -72,10 +107,7 @@ export default function AuthPage() {
 
             {/* Right Side - Form */}
             <div className="flex w-full lg:w-1/2 items-center justify-center bg-background p-8">
-                {/* Increased width from sm:w-[350px] to sm:w-[450px] to fit Wizard content better */}
                 <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[450px]">
-
-                    {/* Hide this header when in ForgotPassword mode to avoid duplication */}
                     {!isForgot && (
                         <div className="flex flex-col space-y-2 text-center">
                             <h1 className="text-2xl font-semibold tracking-tight">
@@ -91,9 +123,8 @@ export default function AuthPage() {
 
                     {isSignup ? (
                         <SignUpWizard
-                            initialStep={oauthStart ? "PROFILE" : "CREDENTIALS"}
+                            initialStep={"CREDENTIALS"}
                             onBackToLogin={() => {
-                                setOauthStart(false);
                                 navigate("/auth");
                             }}
                         />
@@ -109,11 +140,39 @@ export default function AuthPage() {
                             <div className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="email">Email</Label>
-                                    <Input id="email" type="email" placeholder="name@example.com" required />
+                                    <Input
+                                        id="email"
+                                        type="email"
+                                        placeholder="name@example.com"
+                                        required
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                    />
                                 </div>
+
                                 <div className="space-y-2">
                                     <Label htmlFor="password">Password</Label>
-                                    <Input id="password" type="password" required />
+                                    <div className="relative">
+                                        <Input
+                                            id="password"
+                                            type={showPassword ? "text" : "password"}
+                                            required
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="pr-10"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword(!showPassword)}
+                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 focus:outline-none"
+                                        >
+                                            {showPassword ? (
+                                                <EyeOff className="h-4 w-4" />
+                                            ) : (
+                                                <Eye className="h-4 w-4" />
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -130,9 +189,14 @@ export default function AuthPage() {
                                 </Link>
                             </div>
 
-                            <Button className="w-full" size="lg" onClick={handleLogin}>
-                                Sign In
-                            </Button>
+                            <motion.div
+                                animate={shake ? { x: [-10, 10, -10, 10, 0] } : {}}
+                                transition={{ duration: 0.4 }}
+                            >
+                                <Button className="w-full" size="lg" onClick={handleLogin} disabled={loading}>
+                                    {loading ? "Signing in..." : "Sign In"}
+                                </Button>
+                            </motion.div>
 
                             <div className="relative">
                                 <div className="absolute inset-0 flex items-center">

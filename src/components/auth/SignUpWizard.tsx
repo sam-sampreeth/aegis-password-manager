@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,6 +8,7 @@ import { ShieldAlert, Copy, Check, ArrowRight, KeyRound, Eye, EyeOff } from "luc
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { generateVaultKey, generateSalt, deriveMasterKey, encryptVaultKey, generateRecoveryCodeData } from "@/lib/crypto";
 
 // Types
 type Step = "CREDENTIALS" | "PROFILE" | "MASTER_PASSWORD" | "BACKUP_CODES";
@@ -42,19 +44,19 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
     const [backupCodes, setBackupCodes] = useState<string[]>([]);
     const [copiedCodes, setCopiedCodes] = useState(false);
 
+    // Username Validation
+    const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+    const [checkingUsername, setCheckingUsername] = useState(false);
+
     // Generators
-    const generateBackupCodes = () => {
-        const codes = [];
-        const chars = "abcdefghjkmnpqrstuvwxyz23456789"; // No ambiguous chars (i, l, 1, o, 0)
-        for (let i = 0; i < 5; i++) {
-            let code = "";
-            for (let j = 0; j < 10; j++) {
-                if (j === 5) code += "-";
-                code += chars.charAt(Math.floor(Math.random() * chars.length));
-            }
-            codes.push(code);
-        }
-        setBackupCodes(codes);
+    const generateBackupCodes = async () => {
+        // Generate vault key and recovery codes
+        const vaultKey = generateVaultKey();
+        const recoveryData = await generateRecoveryCodeData(vaultKey, 10);
+        setBackupCodes(recoveryData.codes);
+        // Store vault key AND recovery data temporarily for registration
+        sessionStorage.setItem('tempVaultKey', vaultKey);
+        sessionStorage.setItem('tempRecoveryData', JSON.stringify(recoveryData));
     };
 
     // Effects
@@ -79,6 +81,50 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
         }
     }, [step]);
 
+    // Check username availability with debounce
+    useEffect(() => {
+        const checkUsernameAvailability = async () => {
+            const username = formData.username.toLowerCase().trim();
+
+            // Reset if empty
+            if (!username) {
+                setUsernameAvailable(null);
+                setCheckingUsername(false);
+                return;
+            }
+
+            // Only check if basic format is valid
+            if (username.length >= 3 && username.length <= 16 && /^[a-z0-9-]+$/.test(username) && !/^\d/.test(username)) {
+                try {
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('username')
+                        .eq('username', username)
+                        .maybeSingle();
+
+                    if (error) throw error;
+                    setUsernameAvailable(data === null);
+                } catch (error) {
+                    console.error('Error checking username:', error);
+                    setUsernameAvailable(null);
+                } finally {
+                    setCheckingUsername(false);
+                }
+            } else {
+                setUsernameAvailable(null);
+                setCheckingUsername(false);
+            }
+        };
+
+        // Show loader immediately when username changes
+        if (formData.username.length >= 3) {
+            setCheckingUsername(true);
+        }
+
+        const timer = setTimeout(checkUsernameAvailability, 2000);
+        return () => clearTimeout(timer);
+    }, [formData.username]);
+
     // Password Strength
     const getPasswordStrength = (pass: string) => {
         return {
@@ -92,9 +138,24 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
     const passwordStrength = getPasswordStrength(formData.password);
     const isPasswordStrong = Object.values(passwordStrength).every(Boolean);
 
+    // Username Validation
+    const getUsernameValidation = (username: string) => {
+        return {
+            length: username.length >= 3 && username.length <= 16,
+            format: /^[a-z0-9-]+$/.test(username) && !/\s/.test(username), // lowercase, numbers, hyphens only, no spaces
+            noNumberStart: username.length > 0 && !/^\d/.test(username),
+            available: usernameAvailable === true,
+        };
+    };
+
+    const usernameValidation = getUsernameValidation(formData.username);
+    const isUsernameValid = usernameValidation.length && usernameValidation.format && usernameValidation.noNumberStart && usernameValidation.available;
+
     // Input Change Handler to clear error
     const handleChange = (field: string, value: string) => {
-        setFormData(prev => ({ ...prev, [field]: value }));
+        // Auto-lowercase username
+        const finalValue = field === 'username' ? value.toLowerCase() : value;
+        setFormData(prev => ({ ...prev, [field]: finalValue }));
         if (errors[field]) {
             setErrors(prev => ({ ...prev, [field]: false }));
         }
@@ -132,6 +193,12 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
                 toast.error(`${missingFields.join(" and ")} is required.`);
                 return;
             }
+
+            if (!isUsernameValid) {
+                setShake(prev => prev + 1);
+                toast.error("Please meet all username requirements.");
+                return;
+            }
             setStep("MASTER_PASSWORD");
         } else if (step === "MASTER_PASSWORD") {
             if (!formData.masterPassword) {
@@ -148,9 +215,99 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
                 toast.error("Please copy your backup codes first.");
                 return;
             }
-            // Finish
+            // Finish & Register
+            handleRegistration();
+        }
+    };
+
+    const handleRegistration = async () => {
+        try {
+            // 1. Sign Up User
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: formData.email,
+                password: formData.password,
+                options: {
+                    emailRedirectTo: undefined, // Disable confirmation emails
+                    data: {
+                        display_name: formData.name,
+                        username: formData.username,
+                    }
+                }
+            });
+
+            if (authError) throw authError;
+
+            if (!authData.user) throw new Error("User creation failed");
+
+            // 2. Generate and encrypt vault key
+            let vaultKey = sessionStorage.getItem('tempVaultKey');
+            if (!vaultKey) {
+                console.warn("Vault key not found, regenerating");
+                vaultKey = generateVaultKey();
+            }
+
+            const salt = generateSalt();
+            const masterKey = await deriveMasterKey(formData.masterPassword, salt);
+            const encryptedVaultKey = await encryptVaultKey(vaultKey, masterKey);
+
+            // 3. Get recovery codes from session storage (generated earlier)
+            const storedRecoveryData = sessionStorage.getItem('tempRecoveryData');
+            let recoveryCodesJson: string;
+
+            if (storedRecoveryData) {
+                // Use the recovery data that was shown to the user
+                recoveryCodesJson = storedRecoveryData;
+            } else {
+                // Fallback: generate new codes (shouldn't happen in normal flow)
+                console.warn("Recovery data not found in session, regenerating");
+                const recoveryData = await generateRecoveryCodeData(vaultKey, 10);
+                recoveryCodesJson = JSON.stringify(recoveryData);
+            }
+
+            // 4. Store encrypted data in user_settings
+            const { error: settingsError } = await supabase
+                .from('user_settings')
+                .upsert({
+                    user_id: authData.user.id,
+                    encrypted_vault_key: encryptedVaultKey,
+                    vault_key_salt: salt,
+                    encrypted_recovery_codes: recoveryCodesJson,
+                });
+
+            if (settingsError) throw settingsError;
+
+            // 5. Update profile
+            const { error: profileError } = await supabase
+                .from('profiles')
+                .upsert({
+                    id: authData.user.id,
+                    display_name: formData.name,
+                    username: formData.username,
+                });
+
+            if (profileError) {
+                console.error("Profile update error:", profileError);
+            }
+
+            // 6. Store vault key in session for immediate use
+            sessionStorage.setItem('vaultKey', vaultKey);
+            sessionStorage.removeItem('tempVaultKey');
+            sessionStorage.removeItem('tempRecoveryData');
+
+            // 7. Log recovery codes generation
+            await supabase.from('vault_activity').insert({
+                user_id: authData.user.id,
+                event_type: 'recovery_codes_generated',
+                metadata: { timestamp: new Date().toISOString() }
+            });
+
             toast.success("Account Created Successfully!");
             navigate("/vault");
+
+        } catch (error: any) {
+            console.error("Registration error:", error);
+            toast.error(error.message || "Registration failed");
+            sessionStorage.removeItem('tempVaultKey');
         }
     };
 
@@ -284,6 +441,44 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
                                 className={cn(errors.username && "border-red-500 focus-visible:ring-red-500")}
                             />
                         </div>
+
+                        {/* Username Requirements - Only show if username is not empty */}
+                        <AnimatePresence>
+                            {formData.username.length > 0 && (
+                                <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: "auto" }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    className="space-y-2 bg-zinc-900/50 p-3 rounded-md border border-white/5 overflow-hidden"
+                                >
+                                    <p className="text-xs font-medium text-muted-foreground mb-2">Username Requirements:</p>
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                        <div className={`flex items-center gap-1.5 ${usernameValidation.length ? "text-green-500" : "text-neutral-500"}`}>
+                                            {usernameValidation.length ? <Check className="w-3 h-3" /> : <div className="w-3 h-3 rounded-full border border-current" />}
+                                            3-16 characters
+                                        </div>
+                                        <div className={`flex items-center gap-1.5 ${usernameValidation.format ? "text-green-500" : "text-neutral-500"}`}>
+                                            {usernameValidation.format ? <Check className="w-3 h-3" /> : <div className="w-3 h-3 rounded-full border border-current" />}
+                                            Lowercase, hyphens only
+                                        </div>
+                                        <div className={`flex items-center gap-1.5 ${usernameValidation.noNumberStart ? "text-green-500" : "text-neutral-500"}`}>
+                                            {usernameValidation.noNumberStart ? <Check className="w-3 h-3" /> : <div className="w-3 h-3 rounded-full border border-current" />}
+                                            No number at start
+                                        </div>
+                                        <div className={`flex items-center gap-1.5 ${checkingUsername ? "text-blue-400" : usernameValidation.available ? "text-green-500" : usernameAvailable === false ? "text-red-500" : "text-neutral-500"}`}>
+                                            {checkingUsername ? (
+                                                <div className="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                                            ) : usernameValidation.available ? (
+                                                <Check className="w-3 h-3" />
+                                            ) : (
+                                                <div className="w-3 h-3 rounded-full border border-current" />
+                                            )}
+                                            {checkingUsername ? "Checking..." : "Available"}
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                         <motion.div
                             key={shake}
                             animate={{ x: shake ? [-10, 10, -10, 10, 0] : 0 }}

@@ -58,11 +58,15 @@ export function LockScreen() {
 
     const { title, description } = getLockMessage();
 
-    const handleUnlock = (e: React.FormEvent) => {
+    const handleUnlock = async (e: React.FormEvent) => {
         e.preventDefault();
-        const secret = authMethod === "password" ? password : backupCode;
+        const secret = authMethod === "password" ? password : (backupCode.slice(0, 5) + '-' + backupCode.slice(5));
+        const isRecoveryCode = authMethod === "backup";
 
-        if (unlockVault(secret)) {
+
+        const success = await unlockVault(secret, isRecoveryCode);
+
+        if (success) {
             toast.success("Vault Unlocked");
         } else {
             setError(true);
@@ -76,25 +80,23 @@ export function LockScreen() {
         }
     };
 
-    // Backup Code Input Logic
+    // Backup Code Input Logic (10 digits: xxxxx-xxxxx)
     const handleBackupChange = (index: number, value: string) => {
         if (value.length > 1) {
-            const pastedData = value.slice(0, 6).toUpperCase(); // Normalize
+            // Handle paste - remove dashes and take first 10 chars
+            const pastedData = value.replace(/-/g, '').slice(0, 10).toLowerCase();
             setBackupCode(pastedData);
-            inputRefs.current[Math.min(5, pastedData.length - 1)]?.focus();
-            if (pastedData.length === 6) {
-                // Auto submit? Maybe wait for manual click for safety or consistent feel
-            }
+            inputRefs.current[Math.min(9, pastedData.length - 1)]?.focus();
             return;
         }
 
         const newCode = backupCode.split("");
-        while (newCode.length < 6) newCode.push("");
-        newCode[index] = value.toUpperCase();
-        const finalCode = newCode.join("").slice(0, 6);
+        while (newCode.length < 10) newCode.push("");
+        newCode[index] = value.toLowerCase();
+        const finalCode = newCode.join("").slice(0, 10);
         setBackupCode(finalCode);
 
-        if (value && index < 5) {
+        if (value && index < 9) {
             inputRefs.current[index + 1]?.focus();
         }
     };
@@ -107,10 +109,10 @@ export function LockScreen() {
 
     const handleBackupPaste = (e: React.ClipboardEvent) => {
         e.preventDefault();
-        const pastedData = e.clipboardData.getData("text/plain").replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase();
+        const pastedData = e.clipboardData.getData("text/plain").replace(/[^a-zA-Z0-9]/g, "").slice(0, 10).toLowerCase();
         if (pastedData) {
             setBackupCode(pastedData);
-            inputRefs.current[Math.min(5, pastedData.length - 1)]?.focus();
+            inputRefs.current[Math.min(9, pastedData.length - 1)]?.focus();
         }
     };
 
@@ -155,32 +157,32 @@ export function LockScreen() {
                                 />
                             </div>
                         ) : (
-                            <div className="flex items-center justify-center gap-2" onPaste={handleBackupPaste}>
-                                {/* First Group */}
+                            <div className="flex items-center justify-center gap-1.5" onPaste={handleBackupPaste}>
+                                {/* First Group (5 chars) */}
                                 <div className="flex gap-1">
-                                    {[0, 1, 2].map((index) => (
+                                    {[0, 1, 2, 3, 4].map((index) => (
                                         <Input
                                             key={index}
                                             ref={(el) => { inputRefs.current[index] = el }}
                                             type="text"
                                             maxLength={1}
-                                            className={`w-10 h-12 text-center text-xl font-mono uppercase bg-zinc-950/50 border-white/10 focus:border-blue-500/50 ${error ? "border-red-500/50" : ""}`}
+                                            className={`w-9 h-11 text-center text-lg font-mono lowercase bg-zinc-950/50 border-white/10 focus:border-blue-500/50 ${error ? "border-red-500/50" : ""}`}
                                             value={backupCode[index] || ""}
                                             onChange={(e) => handleBackupChange(index, e.target.value)}
                                             onKeyDown={(e) => handleBackupKeyDown(index, e)}
                                         />
                                     ))}
                                 </div>
-                                <span className="text-neutral-500 font-bold mx-1">-</span>
-                                {/* Second Group */}
+                                <span className="text-neutral-500 font-bold text-lg">-</span>
+                                {/* Second Group (5 chars) */}
                                 <div className="flex gap-1">
-                                    {[3, 4, 5].map((index) => (
+                                    {[5, 6, 7, 8, 9].map((index) => (
                                         <Input
                                             key={index}
                                             ref={(el) => { inputRefs.current[index] = el }}
                                             type="text"
                                             maxLength={1}
-                                            className={`w-10 h-12 text-center text-xl font-mono uppercase bg-zinc-950/50 border-white/10 focus:border-blue-500/50 ${error ? "border-red-500/50" : ""}`}
+                                            className={`w-9 h-11 text-center text-lg font-mono lowercase bg-zinc-950/50 border-white/10 focus:border-blue-500/50 ${error ? "border-red-500/50" : ""}`}
                                             value={backupCode[index] || ""}
                                             onChange={(e) => handleBackupChange(index, e.target.value)}
                                             onKeyDown={(e) => handleBackupKeyDown(index, e)}
