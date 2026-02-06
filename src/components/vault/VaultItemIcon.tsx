@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { Globe, Plus } from "lucide-react";
-import { VaultItem } from "@/data/dummyVault";
+import { VaultItem } from "@/hooks/useVault";
 
-export const VaultItemIcon = ({ item, className = "w-10 h-10" }: { item: VaultItem | null; className?: string }) => {
+export const VaultItemIcon = ({ item, className = "w-10 h-10" }: {
+    item: {
+        category: string;
+        urls?: string[];
+        name?: string;
+    } | VaultItem | null;
+    className?: string
+}) => {
     const [imageError, setImageError] = useState(false);
 
     if (!item) {
@@ -28,7 +35,7 @@ export const VaultItemIcon = ({ item, className = "w-10 h-10" }: { item: VaultIt
         }
     };
 
-    const faviconUrl = getFaviconUrl(item.urls);
+    const faviconUrl = getFaviconUrl(item.urls || []);
 
     if (faviconUrl && !imageError) {
         return (

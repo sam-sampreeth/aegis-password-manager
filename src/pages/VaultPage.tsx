@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-
-import { dummyVault, VaultItem } from "@/data/dummyVault";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { VaultItemDialog } from "@/components/vault/VaultItemDialog";
 import {
@@ -28,12 +26,9 @@ import {
     Search,
     Plus,
     Filter,
-    Heart,
     MoreVertical,
-    Copy,
     User,
     KeyRound,
-    ShieldCheck,
     Unlock,
     Cloud,
     Check,
@@ -42,12 +37,15 @@ import {
     X,
     Ghost,
     Pencil,
-    Trash2
+    Trash2,
+    Star
 } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { VaultItemIcon } from "@/components/vault/VaultItemIcon";
 import { AdvancedFilterDialog, FilterState } from "@/components/vault/AdvancedFilterDialog";
+import { useVaultItems, VaultItem } from "@/hooks/useVault";
+import { useVaultActivity } from "@/hooks/useVaultActivity";
 
 const AnimatedFilterList = ({ categories, selectedCategory, onSelect, onAdvancedClick }: { categories: string[], selectedCategory: string, onSelect: (c: string) => void, onAdvancedClick: () => void }) => {
     const specialFilters = ["All", "Favorites", "Weak"];
@@ -95,7 +93,9 @@ const AnimatedFilterList = ({ categories, selectedCategory, onSelect, onAdvanced
 };
 
 export default function VaultPage() {
-    const [items, setItems] = useState<VaultItem[]>(dummyVault);
+    const { items: vaultItems, loading: itemsLoading, addItem, updateItem, deleteItem } = useVaultItems();
+    const { logActivity } = useVaultActivity();
+
     const [selectedCategory, setSelectedCategory] = useState<string>("All");
     const [sortOption, setSortOption] = useState<"edited" | "created" | "name">("edited");
     const [selectedItem, setSelectedItem] = useState<VaultItem | null>(null);
@@ -104,14 +104,25 @@ export default function VaultPage() {
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
 
     const [itemToDelete, setItemToDelete] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
     const searchInputRef = useRef<HTMLInputElement>(null);
 
-    // Simulate initial loading
+    // URL Deep Linking
+    const [searchParams, setSearchParams] = useSearchParams();
+
     useEffect(() => {
-        const timer = setTimeout(() => setIsLoading(false), 1000);
-        return () => clearTimeout(timer);
-    }, []);
+        const openId = searchParams.get("openId");
+        if (openId && !itemsLoading && vaultItems.length > 0) {
+            const item = vaultItems.find(i => i.id === openId);
+            if (item) {
+                setSelectedItem(item);
+                setIsDialogOpen(true);
+                // Optional: clear param so refresh doesn't re-open, 
+                // but keeping it is fine for "sharing" URLs conceptually.
+                // For now, let's clear it to avoid stuck state if they close dialog.
+                setSearchParams({}, { replace: true });
+            }
+        }
+    }, [searchParams, vaultItems, itemsLoading, setSearchParams]);
 
     // Keyboard Shortcuts
     useEffect(() => {
@@ -121,8 +132,6 @@ export default function VaultPage() {
                 e.preventDefault();
                 searchInputRef.current?.focus();
             }
-            // Dialog close (Esc) is handled by Radix automatically, 
-            // but we ensure clean state if needed.
         };
 
         window.addEventListener("keydown", handleKeyDown);
@@ -141,22 +150,12 @@ export default function VaultPage() {
         showArchived: false,
     });
 
-
-
     const categories = ["All", "Social", "Work", "Finance", "Entertainment", "Other"];
-
-    const categoryColorMap: Record<string, string> = {
-        "Social": "bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20",
-        "Work": "bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20",
-        "Finance": "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20",
-        "Entertainment": "bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20",
-        "Other": "bg-zinc-800 text-neutral-300 border-white/5 hover:bg-zinc-700 hover:text-white"
-    };
 
     const [searchQuery, setSearchQuery] = useState("");
 
     const securityStats = useMemo(() => {
-        const total = items.length;
+        const total = vaultItems.length;
         if (total === 0) return { score: 0, weakCount: 0, reusedCount: 0, oldCount: 0 };
 
         const now = new Date();
@@ -164,7 +163,7 @@ export default function VaultPage() {
 
         // Create a map to count password occurrences
         const passwordCounts = new Map<string, number>();
-        items.forEach(item => {
+        vaultItems.forEach(item => {
             passwordCounts.set(item.password, (passwordCounts.get(item.password) || 0) + 1);
         });
 
@@ -174,7 +173,7 @@ export default function VaultPage() {
         let reusedItems = 0;
         let oldItems = 0;
 
-        items.forEach(item => {
+        vaultItems.forEach(item => {
             totalStrength += item.strength;
             if (item.totpSecret) withTotp++;
 
@@ -207,51 +206,64 @@ export default function VaultPage() {
             reusedCount: reusedItems,
             oldCount: oldItems
         };
-    }, [items]);
+    }, [vaultItems]);
 
-    const allFilteredItems = dummyVault
-        .filter(item => {
-            // Search Query
-            if (searchQuery) {
-                const query = searchQuery.toLowerCase();
+    const filteredItems = useMemo(() => {
+        if (itemsLoading) return [];
+        let items = [...vaultItems];
+
+        // 1. Search Query
+        if (searchQuery) {
+            const query = searchQuery.toLowerCase();
+            items = items.filter(item => {
                 const matchesName = item.name.toLowerCase().includes(query);
                 const matchesUsername = item.username.toLowerCase().includes(query);
                 const matchesTags = item.tags.some(t => t.toLowerCase().includes(query));
-                if (!matchesName && !matchesUsername && !matchesTags) return false;
-            }
+                return matchesName || matchesUsername || matchesTags;
+            });
+        }
 
-            // Quick Filters (Dropdown)
-            if (selectedCategory === "Favorites" && !item.favorite) return false;
-            if (selectedCategory === "Weak" && item.strength >= 3) return false;
-            if (selectedCategory !== "All" && selectedCategory !== "Favorites" && selectedCategory !== "Weak" && item.category !== selectedCategory) return false;
+        // 2. Quick Filters (Dropdown)
+        if (selectedCategory === "Favorites") {
+            items = items.filter(item => item.favorite);
+        } else if (selectedCategory === "Weak") {
+            items = items.filter(item => item.strength < 3);
+        } else if (selectedCategory !== "All") {
+            items = items.filter(item => item.category === selectedCategory);
+        }
 
-            // Advanced Filters
-            // Category check
-            if (activeFilters.categories.length > 0 && !activeFilters.categories.includes(item.category)) return false;
+        // 3. Advanced Filters
+        if (activeFilters.categories.length > 0) {
+            items = items.filter(item => activeFilters.categories.includes(item.category));
+        }
 
-            // Tag check (if any selected tag matches)
-            if (activeFilters.tags.length > 0) {
-                const hasMatchingTag = item.tags ? item.tags.some(t => activeFilters.tags.includes(t)) : false;
-                if (!hasMatchingTag) return false;
-            }
+        if (activeFilters.tags.length > 0) {
+            items = items.filter(item => item.tags ? item.tags.some(t => activeFilters.tags.includes(t)) : false);
+        }
 
-            // Strength check
-            if (item.strength < activeFilters.strengthRange[0] || item.strength > activeFilters.strengthRange[1]) return false;
+        if (activeFilters.strengthRange[0] !== 0 || activeFilters.strengthRange[1] !== 4) {
+            items = items.filter(item => item.strength >= activeFilters.strengthRange[0] && item.strength <= activeFilters.strengthRange[1]);
+        }
 
-            // Property checks
-            if (activeFilters.hasTotp === true && !item.totpSecret) return false;
-            if (activeFilters.isFavorite === true && !item.favorite) return false;
+        if (activeFilters.hasTotp !== "any") {
+            items = items.filter(item => activeFilters.hasTotp === true ? !!item.totpSecret : !item.totpSecret);
+        }
 
-            // Date check
-            if (activeFilters.dateRange.from) {
+        if (activeFilters.isFavorite !== "any") {
+            items = items.filter(item => activeFilters.isFavorite === true ? item.favorite : !item.favorite);
+        }
+
+        if (activeFilters.dateRange.from) {
+            items = items.filter(item => {
                 const itemDate = new Date(item.updatedAt);
-                if (itemDate < activeFilters.dateRange.from) return false;
+                if (itemDate < activeFilters.dateRange.from!) return false;
                 if (activeFilters.dateRange.to && itemDate > activeFilters.dateRange.to) return false;
-            }
+                return true;
+            });
+        }
 
-            return true;
-        })
-        .sort((a, b) => {
+        // 4. Sorting
+        items.sort((a, b) => {
             if (sortOption === "edited") {
                 return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
             }
@@ -264,7 +276,8 @@ export default function VaultPage() {
             return 0;
         });
 
-
+        return items;
+    }, [vaultItems, searchQuery, selectedCategory, sortOption, activeFilters, itemsLoading]);
 
     const handleItemClick = (item: VaultItem) => {
         setSelectedItem(item);
@@ -274,7 +287,7 @@ export default function VaultPage() {
 
     const handleCreateNew = () => {
         const newItem: VaultItem = {
-            id: `new-${Date.now()}`,
+            id: "", // Will be assigned by DB
             name: "",
             username: "",
             password: "",
@@ -292,17 +305,13 @@ export default function VaultPage() {
         setIsDialogOpen(true);
     };
 
-    const toggleFavorite = (e: React.MouseEvent, id: string) => {
+    const toggleFavorite = async (e: React.MouseEvent, id: string, isFav: boolean) => {
         e.stopPropagation();
+        await updateItem(id, { favorite: !isFav });
+        logActivity("favorite", id);
 
-        const updatedItems = items.map(item =>
-            item.id === id ? { ...item, favorite: !item.favorite } : item
-        );
-        setItems(updatedItems);
-
-        // Update selected item if it's the one being toggled
-        if (selectedItem && selectedItem.id === id) {
-            setSelectedItem({ ...selectedItem, favorite: !selectedItem.favorite });
+        if (selectedItem?.id === id) {
+            setSelectedItem(prev => prev ? ({ ...prev, favorite: !isFav }) : null);
         }
     };
 
@@ -312,11 +321,10 @@ export default function VaultPage() {
         setIsDeleteAlertOpen(true);
     };
 
-    const confirmDelete = () => {
+    const confirmDelete = async () => {
         if (itemToDelete) {
-            console.log("Deleting item", itemToDelete);
-            // In a real app, perform delete API call here
-            // setDummyVault(prev => prev.filter(item => item.id !== itemToDelete));
+            await deleteItem(itemToDelete);
+            logActivity("delete", itemToDelete);
             setIsDeleteAlertOpen(false);
             setItemToDelete(null);
         }
@@ -326,10 +334,7 @@ export default function VaultPage() {
         <div className="flex h-screen w-full bg-zinc-950 text-white selection:bg-blue-500/30 overflow-hidden relative">
             <div className="absolute inset-0 z-0 bg-grid-white/[0.02] pointer-events-none" />
             <div className="absolute inset-0 z-0 bg-gradient-to-br from-blue-900/10 via-zinc-950/50 to-zinc-950 pointer-events-none" />
-            {/* Sidebar */}
 
-
-            {/* Main Content */}
             <main className="flex-1 flex flex-col min-w-0">
                 {/* Header */}
                 <header className="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-zinc-950/30 backdrop-blur-md gap-4">
@@ -339,12 +344,12 @@ export default function VaultPage() {
                                 {useMemo(() => {
                                     const hour = new Date().getHours();
                                     const greetings = {
-                                        late: ["Working late", "Burning the midnight oil", "The night is young", "Still awake?", "Late night grind"],
-                                        early: ["Rise and shine", "Early bird gets the worm", "Good morning", "Ready for the day?"],
-                                        morning: ["Good morning", "Have a great day", "Time to focus", "Productive morning?"],
-                                        afternoon: ["Good afternoon", "How's the day going?", "Stay focused", "Need a coffee break?"],
-                                        evening: ["Good evening", "Winding down?", "Productive day?", "Almost time to relax"],
-                                        night: ["Getting late", "Time to wrap up?", "Good evening", "Still going?"]
+                                        late: ["Working late", "Burning the midnight oil", "The night is young"],
+                                        early: ["Rise and shine", "Early bird gets the worm"],
+                                        morning: ["Good morning", "Have a great day"],
+                                        afternoon: ["Good afternoon", "How's the day going?"],
+                                        evening: ["Good evening", "Winding down?"],
+                                        night: ["Getting late", "Time to wrap up?"]
                                     };
 
                                     let timeSlot: keyof typeof greetings = "morning";
@@ -371,7 +376,7 @@ export default function VaultPage() {
                             </div>
                         </div>
 
-                        {/* Search Bar - Moved Here */}
+                        {/* Search Bar */}
                         <div className="relative max-w-md w-full hidden md:block">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
                             <Input
@@ -385,7 +390,6 @@ export default function VaultPage() {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        {/* Mobile Search Icon (optional, if space is tight) */}
                         <Button size="icon" variant="ghost" className="md:hidden text-neutral-400">
                             <Search className="w-4 h-4" />
                         </Button>
@@ -450,20 +454,20 @@ export default function VaultPage() {
                         <div className="group p-4 rounded-xl border border-white/10 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all hover:border-blue-500/20 relative overflow-hidden">
                             <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                             <div className="text-neutral-400 text-sm mb-1 relative z-10">Total Passwords</div>
-                            <div className="text-2xl font-bold relative z-10">{items.length}</div>
+                            <div className="text-2xl font-bold relative z-10">{itemsLoading ? "..." : vaultItems.length}</div>
                         </div>
                         <div className="group p-4 rounded-xl border border-white/10 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all hover:border-orange-500/20 relative overflow-hidden">
                             <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                             <div className="text-neutral-400 text-sm mb-1 relative z-10">Weak Passwords</div>
                             <div className="text-2xl font-bold text-orange-400 relative z-10">
-                                {securityStats.weakCount}
+                                {itemsLoading ? "..." : securityStats.weakCount}
                             </div>
                         </div>
                         <div className="group p-4 rounded-xl border border-white/10 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all hover:border-emerald-500/20 relative overflow-hidden">
                             <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                             <div className="text-neutral-400 text-sm mb-1 relative z-10">Security Score</div>
                             <div className={`text-2xl font-bold relative z-10 ${securityStats.score >= 80 ? "text-emerald-400" : securityStats.score >= 50 ? "text-yellow-400" : "text-red-400"}`}>
-                                {securityStats.score}%
+                                {itemsLoading ? "..." : securityStats.score}%
                             </div>
                         </div>
                     </div>
@@ -518,11 +522,11 @@ export default function VaultPage() {
                                     )}
                             </div>
                         </div>
-                        <span className="text-sm text-white">{allFilteredItems.length} entries</span>
+                        <span className="text-sm text-white">{filteredItems.length} entries</span>
                     </div>
 
                     {/* Empty State */}
-                    {allFilteredItems.length === 0 && (
+                    {filteredItems.length === 0 && !itemsLoading && (
                         <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in zoom-in duration-500">
                             <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4 border border-white/5">
                                 <Ghost className="w-8 h-8 text-neutral-600" />
@@ -552,121 +556,97 @@ export default function VaultPage() {
                         </div>
                     )}
 
-                    {/* Grid/List */}
-                    <div className="space-y-2">
-                        {isLoading ? (
-                            // Skeleton Loader
-                            Array.from({ length: 5 }).map((_, i) => (
-                                <div key={i} className="flex items-center justify-between p-4 rounded-lg border border-white/5 bg-zinc-900/50">
-                                    <div className="flex items-center gap-4 w-full">
-                                        <Skeleton className="w-10 h-10 rounded-full bg-zinc-800" />
-                                        <div className="space-y-2 flex-1">
-                                            <Skeleton className="h-4 w-1/3 bg-zinc-800" />
-                                            <Skeleton className="h-3 w-1/4 bg-zinc-800" />
-                                        </div>
-                                    </div>
-                                </div>
+                    {/* List View */}
+                    <div className="space-y-1 pb-20">
+                        {itemsLoading ? (
+                            // Skeleton Loading
+                            Array.from({ length: 6 }).map((_, i) => (
+                                <div key={i} className="h-16 bg-zinc-900/50 rounded-lg border border-white/5 animate-pulse" />
                             ))
                         ) : (
-                            allFilteredItems.map((item, idx) => (
+                            filteredItems.map((item, idx) => (
                                 <motion.div
                                     key={item.id}
                                     layoutId={item.id}
                                     onClick={() => handleItemClick(item)}
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: idx * 0.05 }}
-                                    className="group flex items-center justify-between p-4 rounded-lg border border-white/10 bg-zinc-900/60 backdrop-blur-md hover:bg-gradient-to-r hover:from-white/10 hover:to-zinc-900/60 hover:border-blue-500/50 transition-all duration-300 cursor-pointer shadow-sm"
+                                    transition={{ delay: idx * 0.03 }}
+                                    className="group flex items-center justify-between p-3 rounded-lg border border-white/5 bg-zinc-900/30 hover:bg-zinc-900/80 hover:border-blue-500/20 transition-all cursor-pointer"
                                 >
-                                    <div className="flex items-center gap-4 min-w-0">
-                                        <VaultItemIcon item={item} />
-                                        <div className="min-w-0">
-                                            <div className="font-semibold text-white/90 truncate">{item.name || "New Item"}</div>
-                                            <div className="text-sm text-neutral-400 truncate font-medium">{item.username || "—"}</div>
+                                    <div className="flex items-center gap-4 min-w-0 flex-1">
+                                        <div className="relative shrink-0">
+                                            <VaultItemIcon item={item} className="w-10 h-10 rounded-lg" />
+                                            <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-zinc-900 ${item.strength >= 4 ? 'bg-emerald-500' : item.strength >= 2 ? 'bg-yellow-500' : 'bg-red-500'}`} />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-medium text-white truncate">{item.name || "Untitled"}</h3>
+                                                {item.favorite && <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />}
+                                            </div>
+                                            <p className="text-xs text-neutral-500 truncate">{item.username || "—"}</p>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center gap-4">
+                                    {/* Desktop Columns */}
+                                    <div className="hidden md:flex items-center gap-8 mr-8">
+                                        <div className="w-32 truncate text-right">
+                                            <Badge variant="outline" className="bg-white/5 border-white/5 text-neutral-400 font-normal hover:bg-white/10">
+                                                {item.category}
+                                            </Badge>
+                                        </div>
+                                        <div className="w-24 text-right text-xs text-neutral-600 font-mono">
+                                            {new Date(item.updatedAt).toLocaleDateString()}
+                                        </div>
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <Button
                                             size="icon"
                                             variant="ghost"
-                                            className={`h-8 w-8 hover:bg-white/10 ${item.favorite ? "text-yellow-500" : "text-neutral-400 hover:text-white"}`}
-                                            onClick={(e) => toggleFavorite(e, item.id)}
-                                            title={item.favorite ? "Remove from favorites" : "Add to favorites"}
+                                            className="h-8 w-8 text-neutral-400 hover:text-yellow-500 hover:bg-yellow-500/10"
+                                            onClick={(e) => toggleFavorite(e, item.id, item.favorite)}
                                         >
-                                            <Heart className={`w-4 h-4 ${item.favorite ? "fill-yellow-500" : ""}`} />
+                                            <Star className={`w-4 h-4 ${item.favorite ? "fill-current" : ""}`} />
                                         </Button>
-
-                                        <Badge variant="secondary" className={`hidden md:inline-flex w-28 justify-center border transition-colors ${categoryColorMap[item.category] || categoryColorMap["Other"]}`}>
-                                            {item.category}
-                                        </Badge>
+                                        <div className="w-px h-4 bg-white/10 mx-1" />
 
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
-                                                <Button size="icon" variant="ghost" className="h-8 w-8 text-neutral-300 hover:text-white" onClick={(e) => e.stopPropagation()}>
-                                                    <Copy className="w-4 h-4" />
+                                                <Button size="icon" variant="ghost" className="h-8 w-8 text-neutral-400 hover:text-white" onClick={(e) => e.stopPropagation()}>
+                                                    <MoreVertical className="w-4 h-4" />
                                                 </Button>
                                             </DropdownMenuTrigger>
                                             <DropdownMenuContent align="end" className="w-48 bg-zinc-950 border-white/10 text-white">
                                                 <DropdownMenuItem onClick={(e) => {
                                                     e.stopPropagation();
                                                     navigator.clipboard.writeText(item.username);
-                                                    toast("Username copied to clipboard", { icon: <User className="w-4 h-4 text-blue-400" /> });
+                                                    toast.success("Username copied");
                                                 }}>
-                                                    <User className="w-4 h-4 mr-2 text-neutral-400" />
-                                                    <span>Copy Username</span>
+                                                    <User className="w-4 h-4 mr-2" /> Copy Username
                                                 </DropdownMenuItem>
                                                 <DropdownMenuItem onClick={(e) => {
                                                     e.stopPropagation();
                                                     navigator.clipboard.writeText(item.password);
-                                                    toast("Password copied to clipboard", { icon: <KeyRound className="w-4 h-4 text-blue-400" /> });
+                                                    toast.success("Password copied");
                                                 }}>
-                                                    <KeyRound className="w-4 h-4 mr-2 text-neutral-400" />
-                                                    <span>Copy Password</span>
+                                                    <KeyRound className="w-4 h-4 mr-2" /> Copy Password
                                                 </DropdownMenuItem>
-                                                {item.totpSecret && (
-                                                    <DropdownMenuItem onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        navigator.clipboard.writeText("582910");
-                                                        toast("TOTP Code copied to clipboard", { icon: <ShieldCheck className="w-4 h-4 text-blue-400" /> });
-                                                    }}>
-                                                        <ShieldCheck className="w-4 h-4 mr-2 text-blue-400" />
-                                                        <span>Copy TOTP Code</span>
-                                                    </DropdownMenuItem>
-                                                )}
+                                                <DropdownMenuSeparator className="bg-white/10" />
+                                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleItemClick(item); }}>
+                                                    <Pencil className="w-4 h-4 mr-2" /> Edit
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={(e) => handleDelete(e, item.id)} className="text-red-400 focus:text-red-400">
+                                                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                                                </DropdownMenuItem>
                                             </DropdownMenuContent>
                                         </DropdownMenu>
-
-                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-neutral-400 hover:text-white" onClick={(e) => e.stopPropagation()}>
-                                                        <MoreVertical className="w-4 h-4" />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end" className="w-40 bg-zinc-950 border-white/10 text-white">
-                                                    <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleItemClick(item); }}>
-                                                        <Pencil className="w-4 h-4 mr-2 text-neutral-400" />
-                                                        <span>Edit</span>
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuSeparator className="bg-white/10" />
-                                                    <DropdownMenuItem
-                                                        onClick={(e) => handleDelete(e, item.id)}
-                                                        className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
-                                                    >
-                                                        <Trash2 className="w-4 h-4 mr-2" />
-                                                        <span>Delete</span>
-                                                    </DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-                                        </div>
                                     </div>
                                 </motion.div>
                             ))
                         )}
                     </div>
-
-
                 </div>
             </main>
 
@@ -680,7 +660,24 @@ export default function VaultPage() {
                     setItemToDelete(id);
                     setIsDeleteAlertOpen(true);
                 }}
-                onToggleFavorite={(id) => toggleFavorite({ stopPropagation: () => { } } as React.MouseEvent, id)}
+                onSave={async (itemData) => {
+                    try {
+                        if (isCreating) {
+                            await addItem(itemData);
+                            logActivity("create", itemData.id as string || "new");
+                        } else if (selectedItem?.id) {
+                            await updateItem(selectedItem.id, itemData);
+                            logActivity("update", selectedItem.id);
+                        }
+                        setIsDialogOpen(false);
+                    } catch (e) {
+                        // Error handled in hook (toast)
+                    }
+                }}
+                onToggleFavorite={(id) => {
+                    const item = vaultItems.find(i => i.id === id);
+                    if (item) toggleFavorite({ stopPropagation: () => { } } as any, id, item.favorite);
+                }}
             />
 
             <AdvancedFilterDialog

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import * as OTPAuth from "otpauth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,13 +19,15 @@ import {
     Hash,
     ChevronDown,
     Trash2,
-    Heart,
-    Globe
+    Globe,
+    Star
 } from "lucide-react";
-import { VaultItem } from "@/data/dummyVault";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { VaultItemIcon } from "./VaultItemIcon";
 import { generatePassword, evaluateStrength, getStrengthColor } from "@/lib/passwordUtils";
+import { VaultItem } from "@/hooks/useVault";
+
+
 
 interface VaultItemDialogProps {
     item: VaultItem | null;
@@ -33,6 +36,7 @@ interface VaultItemDialogProps {
     isCreating?: boolean;
     onDelete?: (id: string) => void;
     onToggleFavorite?: (id: string) => void;
+    onSave?: (item: Partial<VaultItem>) => Promise<void>;
 }
 
 const PRESET_USERNAMES = [
@@ -43,7 +47,7 @@ const PRESET_USERNAMES = [
     "root"
 ];
 
-const CATEGORIES = ["Social", "Work", "Finance", "Entertainment", "Other"];
+const CATEGORIES: VaultItem['category'][] = ["Social", "Work", "Finance", "Entertainment", "Other"];
 
 const categoryColorMap: Record<string, string> = {
     "Social": "bg-blue-500/10 text-blue-400 border-blue-500/20",
@@ -53,8 +57,9 @@ const categoryColorMap: Record<string, string> = {
     "Other": "bg-zinc-800 text-neutral-300 border-white/5"
 };
 
-export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete, onToggleFavorite }: VaultItemDialogProps) {
+export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete, onToggleFavorite, onSave }: VaultItemDialogProps) {
     const [isEditing, setIsEditing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
 
     // View State
     const [showPassword, setShowPassword] = useState(false);
@@ -106,16 +111,48 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                 });
             }
         }
-    }, [open, item, isCreating]);
+    }, [open, item?.id, isCreating]);
 
-    // Simulated TOTP Timer
+    // Real TOTP Generation
+    const [totpCode, setTotpCode] = useState<string>("--- ---");
+
     useEffect(() => {
-        if (!open || !item?.totpSecret) return;
-        const interval = setInterval(() => {
-            setTotpProgress((prev) => (prev > 0 ? prev - 1 : 30));
-        }, 1000);
+        if (!open || !item?.totpSecret) {
+            setTotpCode("--- ---");
+            return;
+        }
+
+        const updateTotp = () => {
+            try {
+                // Remove spaces and make uppercase
+                const secret = item.totpSecret?.replace(/\s/g, '').toUpperCase();
+                if (!secret) return;
+
+                const totp = new OTPAuth.TOTP({
+                    secret: OTPAuth.Secret.fromBase32(secret),
+                    algorithm: 'SHA1',
+                    digits: 6,
+                    period: 30
+                });
+
+                const token = totp.generate();
+                // Format: 123 456
+                setTotpCode(token.slice(0, 3) + " " + token.slice(3));
+
+                // Calculate progress (seconds remaining in 30s window)
+                const seconds = 30 - (Math.floor(Date.now() / 1000) % 30);
+                setTotpProgress(seconds);
+
+            } catch (e) {
+                console.error("Invalid TOTP Secret", e);
+                setTotpCode("Error");
+            }
+        };
+
+        updateTotp(); // Initial call
+        const interval = setInterval(updateTotp, 1000);
         return () => clearInterval(interval);
-    }, [open, item]);
+    }, [open, item?.totpSecret]);
 
     const handleGeneratePassword = () => {
         const newPass = generatePassword(16, { upper: true, number: true, symbol: true, excludeAmbiguous: false });
@@ -147,7 +184,8 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
         tags: [],
         totpSecret: "",
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        version: 1
     };
 
     return (
@@ -165,13 +203,13 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                         <div className="flex items-center justify-between">
                             <div>
                                 <DialogTitle className="text-2xl font-bold flex items-center gap-3">
-                                    {isEditing ? (isCreating ? "New Item" : "Edit Item") : displayItem.name}
+                                    {isCreating ? "New Item" : displayItem.name}
                                     {!isCreating && (
                                         <button
                                             onClick={() => displayItem.id && onToggleFavorite?.(displayItem.id)}
                                             className="focus:outline-none hover:scale-110 transition-transform"
                                         >
-                                            <Heart
+                                            <Star
                                                 className={`w-6 h-6 transition-colors ${displayItem.favorite ? "text-yellow-500 fill-yellow-500" : "text-neutral-500 hover:text-yellow-500"}`}
                                             />
                                         </button>
@@ -199,7 +237,7 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                         {[0, 1, 2, 3, 4].map((i) => (
                                             <div
                                                 key={i}
-                                                className={`h-1.5 w-3 rounded-full transition-colors duration-300 ${i < (isEditing ? strengthScore : displayItem.strength)
+                                                className={`h-1.5 w-3 rounded-full transition-colors duration-300 ${i < Math.max(1, (isEditing ? strengthScore : displayItem.strength))
                                                     ? getStrengthColor(isEditing ? strengthScore : displayItem.strength)
                                                     : "bg-neutral-800"
                                                     }`}
@@ -309,7 +347,7 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                     {showTotp ? (
                                         <div className="flex items-center justify-between animate-in fade-in duration-300">
                                             <div className="font-mono text-xl md:text-2xl tracking-[0.2em] text-white font-bold tabular-nums">
-                                                582 910
+                                                {totpCode}
                                             </div>
                                             <div className="relative w-6 h-6 flex items-center justify-center">
                                                 <svg className="w-full h-full -rotate-90">
@@ -338,21 +376,35 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                 </div>
                             )}
 
-                            {/* History Section */}
-                            {!isCreating && displayItem.history && (
-                                <div className="pt-4 border-t border-white/5">
-                                    <Label className="text-xs text-neutral-500 uppercase tracking-wider mb-3 block">Item History</Label>
-                                    <div className="space-y-3">
-                                        {displayItem.history.map((event, idx) => (
-                                            <div key={idx} className="flex items-center text-sm text-neutral-400">
-                                                <Clock className="w-3 h-3 mr-2 opacity-50" />
-                                                <span className="flex-1">{event.action}</span>
-                                                <span className="text-neutral-600 text-xs">
-                                                    {new Date(event.revisedAt).toLocaleDateString()}
-                                                </span>
+                            {/* History Section - Always Show Metadata */}
+                            {!isCreating && (
+                                <div className="pt-4 border-t border-white/5 space-y-4">
+                                    <Label className="text-xs text-neutral-500 uppercase tracking-wider block">Item Metadata</Label>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-neutral-500">Created</div>
+                                            <div className="text-sm font-mono text-neutral-300">
+                                                {new Date(displayItem.createdAt).toLocaleDateString()}
+                                                <span className="text-neutral-600 ml-1">{new Date(displayItem.createdAt).toLocaleTimeString()}</span>
                                             </div>
-                                        ))}
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-neutral-500">Last Modified</div>
+                                            <div className="text-sm font-mono text-neutral-300">
+                                                {new Date(displayItem.updatedAt).toLocaleDateString()}
+                                                <span className="text-neutral-600 ml-1">{new Date(displayItem.updatedAt).toLocaleTimeString()}</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <div className="text-xs text-neutral-500">History</div>
+                                            <div className="text-sm font-mono text-neutral-300">
+                                                Total times modified: {Math.max(0, (displayItem.version || 1) - 1)}
+                                            </div>
+                                        </div>
                                     </div>
+
+
                                 </div>
                             )}
                         </div>
@@ -462,6 +514,22 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                             </div>
 
                             <div className="space-y-2">
+                                <Label className="flex justify-between items-center">
+                                    TOTP Secret
+                                    <span className="text-xs text-neutral-500 font-normal">Optional (Base32)</span>
+                                </Label>
+                                <div className="flex items-center gap-2 border border-white/10 rounded-md bg-zinc-900 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500/50">
+                                    <ShieldCheck className="w-4 h-4 text-neutral-500" />
+                                    <input
+                                        className="bg-transparent border-none outline-none text-sm w-full placeholder:text-neutral-600 font-mono"
+                                        value={formData.totpSecret}
+                                        onChange={(e) => setFormData({ ...formData, totpSecret: e.target.value.toUpperCase().replace(/[^A-Z2-7]/g, "") })}
+                                        placeholder="JBSWY3DPEHPK3PXP"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
                                 <Label>Tags</Label>
                                 <div className="flex items-center gap-2 border border-white/10 rounded-md bg-zinc-900 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500/50">
                                     <Hash className="w-4 h-4 text-neutral-500" />
@@ -502,15 +570,47 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                             </Button>
                         ) : (
                             <Button
-                                onClick={() => {
-                                    setIsEditing(false);
-                                    // Here you would trigger actual save logic
-                                    onOpenChange(false);
+                                disabled={isSaving}
+                                onClick={async () => {
+                                    setIsSaving(true);
+                                    try {
+                                        // Construct payload
+                                        const payload: Partial<VaultItem> = {
+                                            name: formData.name,
+                                            username: formData.username,
+                                            password: formData.password,
+                                            category: formData.category as any,
+                                            urls: formData.url ? [formData.url] : [],
+                                            tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
+                                            totpSecret: formData.totpSecret,
+                                            strength: strengthScore
+                                        };
+
+                                        if (onSave) {
+                                            await onSave(payload);
+                                        }
+
+                                        onOpenChange(false);
+                                        setIsEditing(false);
+                                    } catch (e) {
+                                        console.error(e);
+                                    } finally {
+                                        setIsSaving(false);
+                                    }
                                 }}
                                 className="bg-blue-600 hover:bg-blue-700 text-white"
                             >
-                                <Save className="w-4 h-4 mr-2" />
-                                {isCreating ? "Create Item" : "Save Changes"}
+                                {isSaving ? (
+                                    <>
+                                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save className="w-4 h-4 mr-2" />
+                                        {isCreating ? "Create Item" : "Save Changes"}
+                                    </>
+                                )}
                             </Button>
                         )}
                     </div>
