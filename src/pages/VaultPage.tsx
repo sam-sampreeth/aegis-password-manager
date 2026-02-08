@@ -45,6 +45,7 @@ import { AdvancedFilterDialog, FilterState } from "@/components/vault/AdvancedFi
 import { useVaultItems, VaultItem } from "@/hooks/useVault";
 import { useVaultActivity } from "@/hooks/useVaultActivity";
 import { useClipboard } from "@/context/ClipboardContext";
+import { useProfile } from "@/hooks/useProfiles";
 
 const AnimatedFilterList = ({ categories, selectedCategory, onSelect, onAdvancedClick }: { categories: string[], selectedCategory: string, onSelect: (c: string) => void, onAdvancedClick: () => void }) => {
     // ... (rest of the file until handleCreateNew)
@@ -96,6 +97,7 @@ const AnimatedFilterList = ({ categories, selectedCategory, onSelect, onAdvanced
 
 export default function VaultPage() {
     const { items: vaultItems, loading: itemsLoading, addItem, updateItem, deleteItem } = useVaultItems();
+    const { profile } = useProfile();
     const { logActivity } = useVaultActivity();
     const { copyToClipboard } = useClipboard();
 
@@ -375,7 +377,7 @@ export default function VaultPage() {
 
                                     const opts = greetings[timeSlot];
                                     return opts[Math.floor(Math.random() * opts.length)];
-                                }, [])}, Sam
+                                }, [])}, {profile?.display_name || "User"}
                             </h1>
                             <div className="flex items-center gap-3 text-xs text-neutral-500 mt-0.5">
                                 <div className="flex items-center gap-1.5 text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full">
