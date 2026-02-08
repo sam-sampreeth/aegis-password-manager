@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Database } from '../types/database.types';
 import { toast } from 'sonner';
 import { encryptData, decryptData } from '../lib/crypto';
+import { storage } from '../lib/storage';
 
 // Unified VaultItem type for UI
 export type VaultItem = {
@@ -192,7 +193,7 @@ export function useVaultItems() {
 
             if (error) throw error;
 
-            const vaultKey = sessionStorage.getItem('vaultKey');
+            const vaultKey = storage.session.get('vaultKey') || null;
             const parsedItems = await Promise.all((data || []).map(item => parseItem(item, vaultKey)));
             setItems(parsedItems);
         } catch (err: any) {
@@ -235,7 +236,7 @@ export function useVaultItems() {
         }
 
         try {
-            const vaultKey = sessionStorage.getItem('vaultKey');
+            const vaultKey = storage.session.get('vaultKey') || null;
             const encryptedBlob = await packItemBlob(item, vaultKey);
 
             const insertPayload: Database['public']['Tables']['vault_items']['Insert'] = {
@@ -262,7 +263,7 @@ export function useVaultItems() {
 
             if (error) throw error;
 
-            const newItem = await parseItem(data, vaultKey);
+            const newItem = await parseItem(data, vaultKey || null);
             setItems((prev) => [newItem, ...prev]);
             return newItem; // Toast handled by caller or here? Caller in VaultPage used toast, but let's be consistent.
             // Actually VaultPage handled toast. I'll remove toast here to avoid double toast if caller does it.
@@ -303,7 +304,7 @@ export function useVaultItems() {
 
             const merged = { ...currentItem, ...updates, history };
 
-            const vaultKey = sessionStorage.getItem('vaultKey');
+            const vaultKey = storage.session.get('vaultKey') || null;
             const encryptedBlob = await packItemBlob(merged, vaultKey);
 
             const updatePayload: Database['public']['Tables']['vault_items']['Update'] = {
@@ -342,7 +343,7 @@ export function useVaultItems() {
     const importItems = async (newItems: any[]) => {
         if (!user) return;
         try {
-            const vaultKey = sessionStorage.getItem('vaultKey');
+            const vaultKey = storage.session.get('vaultKey') || null;
             // Transform items to DB format (Batch processing)
             const payload = await Promise.all(newItems.map(async (item) => {
                 const encryptedBlob = await packItemBlob(item, vaultKey);
@@ -372,7 +373,7 @@ export function useVaultItems() {
             if (error) throw error;
 
             // Update local state
-            const imported = await Promise.all((data || []).map(item => parseItem(item, vaultKey)));
+            const imported = await Promise.all((data || []).map(item => parseItem(item, vaultKey || null)));
             setItems(prev => [...imported, ...prev]);
 
             return imported.length;
@@ -416,7 +417,7 @@ export function useVaultItems() {
 
         try {
             // Pack full item into blob for trash
-            const vaultKey = sessionStorage.getItem('vaultKey');
+            const vaultKey = storage.session.get('vaultKey') || null;
             const encryptedBlob = await packItemBlob(item, vaultKey);
 
             // @ts-ignore
@@ -467,7 +468,7 @@ export function useVaultTrash() {
 
             if (error) throw error;
 
-            const vaultKey = sessionStorage.getItem('vaultKey');
+            const vaultKey = storage.session.get('vaultKey') || null;
             const parsed = await Promise.all((data || []).map(item => parseTrashItem(item, vaultKey)));
             setTrashItems(parsed);
         } catch (err: any) {
@@ -497,7 +498,7 @@ export function useVaultTrash() {
             // Actually, we should probably keep usage history etc.
 
             // Re-pack blob from trash item details
-            const vaultKey = sessionStorage.getItem('vaultKey');
+            const vaultKey = storage.session.get('vaultKey') || null;
             const blob = await packItemBlob(trashItem, vaultKey);
 
             const insertPayload: Database['public']['Tables']['vault_items']['Insert'] = {

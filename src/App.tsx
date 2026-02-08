@@ -13,6 +13,7 @@ import NotificationsPage from "./pages/NotificationsPage"
 import { DashboardLayout } from "./layouts/DashboardLayout"
 import { Toaster } from "@/components/ui/sonner"
 import { ProfileCompletionDialog } from "./components/auth/ProfileCompletionDialog"
+import CookieConsent from "./components/CookieConsent"
 
 function App() {
   return (
@@ -42,6 +43,7 @@ function App() {
         </Route>
       </Routes>
       <ProfileCompletionDialog />
+      <CookieConsent />
       <Toaster />
     </BrowserRouter>
   )

@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { deriveMasterKey, decryptVaultKey, verifyRecoveryCodeAndGetVaultKey } from "../lib/crypto";
 import { useAuth } from "./AuthContext";
 import { useUserSettings } from "../hooks/useProfiles";
+import { storage } from "../lib/storage";
 
 export type LockReason = "manual" | "inactivity" | "system" | null;
 
@@ -104,7 +105,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
 
             if (vaultKey) {
                 // Success! Store vault key in session
-                sessionStorage.setItem('vaultKey', vaultKey);
+                storage.session.set('vaultKey', vaultKey);
                 setIsLocked(false);
                 setLockReason(null);
                 setLastActivity(Date.now());
@@ -168,7 +169,7 @@ export function LockProvider({ children }: { children: ReactNode }) {
         const handleUnload = () => {
             if (!isLocked && settings?.lock_on_tab_close) {
                 // Clear key and lock
-                sessionStorage.removeItem('vaultKey');
+                storage.session.remove('vaultKey');
                 // We can't easily wait for state update here, but the browser is closing anyway.
                 // However, for REFRESHES, this is important.
             }

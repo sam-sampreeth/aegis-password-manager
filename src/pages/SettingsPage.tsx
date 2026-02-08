@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { useClipboard } from "@/context/ClipboardContext";
 import { useAuth } from "@/context/AuthContext";
+import { storage } from "@/lib/storage";
 
 
 
@@ -58,7 +59,7 @@ export default function SettingsPage() {
                     setDecrypted(encryptedPreset);
                     return;
                 }
-                const vaultKey = sessionStorage.getItem('vaultKey');
+                const vaultKey = storage.session.get('vaultKey') || null;
                 if (vaultKey) {
                     const d = await decryptData(encryptedPreset, vaultKey);
                     if (d) setDecrypted(d);
@@ -89,7 +90,7 @@ export default function SettingsPage() {
 
     const handleAddPreset = async () => {
         if (!newPreset.trim()) return;
-        const vaultKey = sessionStorage.getItem('vaultKey');
+        const vaultKey = storage.session.get('vaultKey') || null;
         if (!vaultKey && !isDemo) {
             toast.error("Vault locked. Please unlock to add presets.");
             return;
