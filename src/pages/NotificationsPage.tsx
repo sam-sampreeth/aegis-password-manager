@@ -1,92 +1,34 @@
-import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Bell,
     ShieldAlert,
     CheckCircle2,
     X,
-    ArrowRight,
     LockKeyhole,
-    Smartphone,
-    CloudOff
+    Info,
+    Check,
+    ArrowRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
-
-type NotificationType = "critical" | "warning" | "info" | "success";
-
-interface Notification {
-    id: string;
-    type: NotificationType;
-    title: string;
-    description: string;
-    date: string;
-    action?: {
-        label: string;
-        onClick: () => void;
-    };
-    icon: React.ElementType;
-}
+import { useNotifications, Notification } from "@/hooks/useNotifications";
+import { Loader2 } from "lucide-react";
 
 export default function NotificationsPage() {
     const navigate = useNavigate();
-    const [notifications, setNotifications] = useState<Notification[]>([
-        {
-            id: "1",
-            type: "critical",
-            title: "Data Breach Alert",
-            description: "5 of your passwords were found in a recent data breach (Glacier Corp). We recommend changing them immediately.",
-            date: "Just now",
-            icon: ShieldAlert,
-            action: {
-                label: "Review Compromised Items",
-                onClick: () => navigate("/vault?filter=weak")
-            }
-        },
-        {
-            id: "2",
-            type: "warning",
-            title: "Security Check Required",
-            description: "You have 3 weak passwords that are easy to guess. Update them to improve your vault health.",
-            date: "2 hours ago",
-            icon: LockKeyhole,
-            action: {
-                label: "Go to Action Center",
-                onClick: () => navigate("/vault/action-center")
-            }
-        },
-        {
-            id: "3",
-            type: "warning",
-            title: "Missing 2FA Protection",
-            description: "Enable 2-Factor Authentication on your Banking and Finance items for extra security.",
-            date: "1 day ago",
-            icon: Smartphone,
-            action: {
-                label: "View Finance Items",
-                onClick: () => navigate("/vault?category=Finance")
-            }
-        },
-        {
-            id: "4",
-            type: "info",
-            title: "Backup Overdue",
-            description: "Your last encrypted backup was 14 days ago. It is recommended to backup your vault weekly.",
-            date: "2 days ago",
-            icon: CloudOff,
-            action: {
-                label: "Backup Now",
-                onClick: () => navigate("/vault/settings")
-            }
-        }
-    ]);
+    const { notifications, loading, dismissNotification, clearAll } = useNotifications();
 
-    const removeNotification = (id: string) => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
+    const getIcon = (type: Notification['type']) => {
+        switch (type) {
+            case 'critical': return ShieldAlert;
+            case 'warning': return LockKeyhole;
+            case 'success': return Check; // Or CheckCircle2
+            case 'info': default: return Info;
+        }
     };
 
-    const getTypeStyles = (type: NotificationType) => {
+    const getTypeStyles = (type: Notification['type']) => {
         switch (type) {
             case "critical":
                 return "bg-red-500/10 border-red-500/20 text-red-200 hover:border-red-500/30";
@@ -100,13 +42,30 @@ export default function NotificationsPage() {
         }
     };
 
-    const getIconColor = (type: NotificationType) => {
+    const getIconColor = (type: Notification['type']) => {
         switch (type) {
             case "critical": return "text-red-500";
             case "warning": return "text-amber-500";
             case "success": return "text-emerald-500";
             default: return "text-blue-500";
         }
+    };
+
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diff = now.getTime() - date.getTime();
+
+        // Simple relative time formatting
+        const seconds = Math.floor(diff / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+
+        if (seconds < 60) return "Just now";
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        return `${days}d ago`;
     };
 
     return (
@@ -131,7 +90,7 @@ export default function NotificationsPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="text-neutral-400 hover:text-white"
-                                onClick={() => setNotifications([])}
+                                onClick={clearAll}
                             >
                                 Mark all as read
                             </Button>
@@ -143,80 +102,89 @@ export default function NotificationsPage() {
                 </header>
 
                 <div className="space-y-4">
-                    <AnimatePresence mode="popLayout">
-                        {notifications.length > 0 ? (
-                            notifications.map((notification) => (
-                                <motion.div
-                                    key={notification.id}
-                                    layout
-                                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, x: -20, scale: 0.95 }}
-                                    className={`relative p-5 rounded-xl border backdrop-blur-sm transition-all duration-200 group ${getTypeStyles(notification.type)}`}
-                                >
-                                    <div className="flex items-start gap-4">
-                                        <div className={`p-2 rounded-lg bg-zinc-950/40 border border-white/5 shrink-0 ${getIconColor(notification.type)}`}>
-                                            <notification.icon className="w-5 h-5" />
-                                        </div>
-
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-start justify-between gap-4">
-                                                <div>
-                                                    <h3 className="font-semibold text-lg leading-tight mb-1">
-                                                        {notification.title}
-                                                    </h3>
-                                                    <p className="text-sm opacity-80 leading-relaxed max-w-2xl">
-                                                        {notification.description}
-                                                    </p>
+                    {loading ? (
+                        <div className="flex justify-center py-12">
+                            <Loader2 className="w-8 h-8 animate-spin text-purple-500" />
+                        </div>
+                    ) : (
+                        <AnimatePresence mode="popLayout">
+                            {notifications.length > 0 ? (
+                                notifications.map((notification) => {
+                                    const Icon = getIcon(notification.type);
+                                    return (
+                                        <motion.div
+                                            key={notification.id}
+                                            layout
+                                            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, x: -20, scale: 0.95 }}
+                                            className={`relative p-5 rounded-xl border backdrop-blur-sm transition-all duration-200 group ${getTypeStyles(notification.type)}`}
+                                        >
+                                            <div className="flex items-start gap-4">
+                                                <div className={`p-2 rounded-lg bg-zinc-950/40 border border-white/5 shrink-0 ${getIconColor(notification.type)}`}>
+                                                    <Icon className="w-5 h-5" />
                                                 </div>
 
-                                                <div className="flex flex-col items-end gap-2 ml-4 shrink-0">
-                                                    <button
-                                                        onClick={() => removeNotification(notification.id)}
-                                                        className="text-neutral-500 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-md"
-                                                        title="Dismiss"
-                                                    >
-                                                        <X className="w-4 h-4" />
-                                                    </button>
-                                                    <span className="text-xs font-medium opacity-50 whitespace-nowrap">
-                                                        {notification.date}
-                                                    </span>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-start justify-between gap-4">
+                                                        <div>
+                                                            <h3 className="font-semibold text-lg leading-tight mb-1">
+                                                                {notification.title}
+                                                            </h3>
+                                                            <p className="text-sm opacity-80 leading-relaxed max-w-2xl">
+                                                                {notification.description}
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="flex flex-col items-end gap-2 ml-4 shrink-0">
+                                                            <button
+                                                                onClick={() => dismissNotification(notification.id)}
+                                                                className="text-neutral-500 hover:text-white transition-colors p-1 hover:bg-white/10 rounded-md"
+                                                                title="Dismiss"
+                                                            >
+                                                                <X className="w-4 h-4" />
+                                                            </button>
+                                                            <span className="text-xs font-medium opacity-50 whitespace-nowrap">
+                                                                {formatDate(notification.created_at)}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    {notification.action_label && notification.action_link && (
+                                                        <div className="mt-2 flex items-center gap-3">
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                onClick={() => navigate(notification.action_link!)}
+                                                                className={`h-8 px-3 text-xs font-medium border border-white/10 hover:bg-white/5 ${getIconColor(notification.type)}`}
+                                                            >
+                                                                {notification.action_label}
+                                                                <ArrowRight className="w-3 h-3 ml-2" />
+                                                            </Button>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
-
-                                            {notification.action && (
-                                                <div className="mt-2 flex items-center gap-3">
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        onClick={notification.action.onClick}
-                                                        className={`h-8 px-3 text-xs font-medium border border-white/10 hover:bg-white/5 ${getIconColor(notification.type)}`}
-                                                    >
-                                                        {notification.action.label}
-                                                        <ArrowRight className="w-3 h-3 ml-2" />
-                                                    </Button>
-                                                </div>
-                                            )}
-                                        </div>
+                                        </motion.div>
+                                    );
+                                })
+                            ) : (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="flex flex-col items-center justify-center py-20 text-center space-y-4"
+                                >
+                                    <div className="w-16 h-16 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
+                                        <CheckCircle2 className="w-8 h-8 text-emerald-500/50" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-medium text-white">All caught up!</h3>
+                                        <p className="text-neutral-500 mt-1">No new notifications at the moment.</p>
                                     </div>
                                 </motion.div>
-                            ))
-                        ) : (
-                            <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                className="flex flex-col items-center justify-center py-20 text-center space-y-4"
-                            >
-                                <div className="w-16 h-16 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center">
-                                    <CheckCircle2 className="w-8 h-8 text-emerald-500/50" />
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-medium text-white">All caught up!</h3>
-                                    <p className="text-neutral-500 mt-1">No new notifications at the moment.</p>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                            )}
+                        </AnimatePresence>
+                    )}
                 </div>
             </div>
         </div>
