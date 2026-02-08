@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Database } from '../types/database.types';
 import { toast } from 'sonner';
+import { encryptData, decryptData } from '../lib/crypto';
 
 // Unified VaultItem type for UI
 export type VaultItem = {
@@ -20,6 +21,7 @@ export type VaultItem = {
     updatedAt: string;
     version: number;
     history: any[];
+    notes?: string;
 };
 
 export type TrashItem = VaultItem & {
@@ -34,12 +36,24 @@ type DbVaultTrash = Database['public']['Tables']['vault_trash']['Row'];
 
 // --- Helper Functions ---
 
-// "Decrypt" (Parse Base64 JSON)
-const parseItem = (dbItem: DbVaultItem): VaultItem => {
+// "Decrypt" (AES-256-GCM Decryption)
+const parseItem = async (dbItem: DbVaultItem, vaultKey: string | null): Promise<VaultItem> => {
     let decrypted: any = {};
     try {
-        const jsonStr = atob(dbItem.encrypted_blob);
-        decrypted = JSON.parse(jsonStr);
+        if (dbItem.encrypted_blob && vaultKey) {
+            const jsonStr = await decryptData(dbItem.encrypted_blob, vaultKey);
+            if (jsonStr) {
+                decrypted = JSON.parse(jsonStr);
+            }
+        } else if (dbItem.encrypted_blob) {
+            // Fallback for legacy items or missing key cases where it might have been Base64 (though we want to avoid this ideally)
+            try {
+                const jsonStr = atob(dbItem.encrypted_blob);
+                decrypted = JSON.parse(jsonStr);
+            } catch (e) {
+                console.error("Failed to parse/decrypt item", dbItem.id);
+            }
+        }
     } catch (e) {
         console.error("Failed to decrypt item", dbItem.id, e);
         decrypted = { username: "", password: "", urls: [], totpSecret: "", history: [] };
@@ -61,15 +75,27 @@ const parseItem = (dbItem: DbVaultItem): VaultItem => {
         password: decrypted.password || "",
         urls: decrypted.urls || [],
         totpSecret: decrypted.totpSecret,
-        history: decrypted.history || []
+        history: decrypted.history || [],
+        notes: decrypted.notes || ""
     };
 };
 
-const parseTrashItem = (dbItem: DbVaultTrash): TrashItem => {
+const parseTrashItem = async (dbItem: DbVaultTrash, vaultKey: string | null): Promise<TrashItem> => {
     let decrypted: any = {};
     try {
-        const jsonStr = atob(dbItem.encrypted_blob);
-        decrypted = JSON.parse(jsonStr);
+        if (dbItem.encrypted_blob && vaultKey) {
+            const jsonStr = await decryptData(dbItem.encrypted_blob, vaultKey);
+            if (jsonStr) {
+                decrypted = JSON.parse(jsonStr);
+            }
+        } else if (dbItem.encrypted_blob) {
+            try {
+                const jsonStr = atob(dbItem.encrypted_blob);
+                decrypted = JSON.parse(jsonStr);
+            } catch (e) {
+                console.error("Failed to parse/decrypt trash item", dbItem.id);
+            }
+        }
     } catch (e) {
         console.error("Failed to decrypt trash item", dbItem.id, e);
         // Minimal fallback
@@ -95,13 +121,14 @@ const parseTrashItem = (dbItem: DbVaultTrash): TrashItem => {
         createdAt: decrypted.createdAt || new Date().toISOString(),
         updatedAt: decrypted.updatedAt || new Date().toISOString(),
         version: decrypted.version || 1,
-        history: decrypted.history || []
+        history: decrypted.history || [],
+        notes: decrypted.notes || ""
     };
 }
 
-// "Encrypt" (Stringify + Base64)
-// Now includes ALL fields to ensure Trash items are self-contained
-const packItemBlob = (item: Partial<VaultItem>) => {
+// "Encrypt" (AES-256-GCM Encryption)
+// Now async as it uses crypto.subtle
+const packItemBlob = async (item: Partial<VaultItem>, vaultKey: string | null) => {
     const payload = {
         name: item.name,
         category: item.category,
@@ -113,23 +140,48 @@ const packItemBlob = (item: Partial<VaultItem>) => {
         totpSecret: item.totpSecret,
         favorite: item.favorite,
         history: item.history, // Include history
+        notes: item.notes,
         createdAt: item.createdAt,
         updatedAt: item.updatedAt
     };
-    return btoa(JSON.stringify(payload));
+
+    const jsonStr = JSON.stringify(payload);
+    if (vaultKey) {
+        return await encryptData(jsonStr, vaultKey);
+    }
+
+    // Fallback to Base64 for demo/legacy but we should avoid this for real users
+    return btoa(jsonStr);
 };
 
 
 // --- Hooks ---
 
 export function useVaultItems() {
-    const { user } = useAuth();
+    const { user, isDemo } = useAuth();
     const [items, setItems] = useState<VaultItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     const fetchItems = async () => {
         if (!user) return;
+
+        if (isDemo) {
+            // Local Mock Data for Demo
+            // We only set this once to allow local mutations during the session
+            if (items.length === 0) {
+                // Lazy import to avoid large bundle for real users? 
+                // Or just import it at top. For now let's modify the top imports.
+                // Actually, we can just use the import here if we are clever, or move import to top.
+                // Let's rely on top level import being added in next step.
+                // Assuming DEMO_ITEMS is available via import (will add import in next step)
+                const { DEMO_ITEMS } = await import('@/data/demoData');
+                setItems(DEMO_ITEMS);
+            }
+            setLoading(false);
+            return;
+        }
+
         try {
             setLoading(true);
             const { data, error } = await supabase
@@ -140,7 +192,8 @@ export function useVaultItems() {
 
             if (error) throw error;
 
-            const parsedItems = (data || []).map(parseItem);
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            const parsedItems = await Promise.all((data || []).map(item => parseItem(item, vaultKey)));
             setItems(parsedItems);
         } catch (err: any) {
             console.error(err);
@@ -158,8 +211,32 @@ export function useVaultItems() {
     const addItem = async (item: Partial<VaultItem>) => {
         if (!user) return;
 
+        if (isDemo) {
+            const newItem: VaultItem = {
+                id: `demo-${Date.now()}`,
+                name: item.name || "New Item",
+                category: item.category || "Other",
+                tags: item.tags || [],
+                strength: item.strength || 0,
+                username: item.username || "",
+                password: item.password || "",
+                urls: item.urls || [],
+                totpSecret: item.totpSecret,
+                favorite: item.favorite || false,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                version: 1,
+                history: [],
+                notes: item.notes || ""
+            };
+            setItems(prev => [newItem, ...prev]);
+            toast.success("Item created (Demo)");
+            return newItem;
+        }
+
         try {
-            const encryptedBlob = packItemBlob(item);
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            const encryptedBlob = await packItemBlob(item, vaultKey);
 
             const insertPayload: Database['public']['Tables']['vault_items']['Insert'] = {
                 user_id: user.id,
@@ -172,7 +249,7 @@ export function useVaultItems() {
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 has_totp: !!item.totpSecret,
-                encryption_version: 1,
+                encryption_version: 1, // We'll increment this as we migrate
                 modified_count: 0
             };
 
@@ -185,7 +262,7 @@ export function useVaultItems() {
 
             if (error) throw error;
 
-            const newItem = parseItem(data);
+            const newItem = await parseItem(data, vaultKey);
             setItems((prev) => [newItem, ...prev]);
             return newItem; // Toast handled by caller or here? Caller in VaultPage used toast, but let's be consistent.
             // Actually VaultPage handled toast. I'll remove toast here to avoid double toast if caller does it.
@@ -199,6 +276,12 @@ export function useVaultItems() {
 
     const updateItem = async (id: string, updates: Partial<VaultItem>) => {
         if (!user) return;
+
+        if (isDemo) {
+            setItems(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+            toast.success("Item updated (Demo)");
+            return;
+        }
 
         try {
             // Merge with existing item to ensure blob has everything
@@ -220,7 +303,8 @@ export function useVaultItems() {
 
             const merged = { ...currentItem, ...updates, history };
 
-            const encryptedBlob = packItemBlob(merged);
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            const encryptedBlob = await packItemBlob(merged, vaultKey);
 
             const updatePayload: Database['public']['Tables']['vault_items']['Update'] = {
                 name: updates.name,
@@ -235,9 +319,9 @@ export function useVaultItems() {
             };
 
             // @ts-ignore
-            const { error } = await supabase
-                .from('vault_items')
-                .update(updatePayload as any)
+            const { error } = await (supabase
+                .from('vault_items') as any)
+                .update(updatePayload)
                 .eq('id', id)
                 .eq('user_id', user.id);
 
@@ -258,9 +342,10 @@ export function useVaultItems() {
     const importItems = async (newItems: any[]) => {
         if (!user) return;
         try {
-            // Transform items to DB format
-            const payload = newItems.map(item => {
-                const encryptedBlob = packItemBlob(item);
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            // Transform items to DB format (Batch processing)
+            const payload = await Promise.all(newItems.map(async (item) => {
+                const encryptedBlob = await packItemBlob(item, vaultKey);
                 return {
                     user_id: user.id,
                     name: item.name || "Untitled",
@@ -275,7 +360,7 @@ export function useVaultItems() {
                     encryption_version: 1,
                     modified_count: 0
                 };
-            });
+            }));
 
             // Supabase batch insert
             // @ts-ignore
@@ -287,7 +372,7 @@ export function useVaultItems() {
             if (error) throw error;
 
             // Update local state
-            const imported = (data || []).map(parseItem);
+            const imported = await Promise.all((data || []).map(item => parseItem(item, vaultKey)));
             setItems(prev => [...imported, ...prev]);
 
             return imported.length;
@@ -319,12 +404,20 @@ export function useVaultItems() {
 
     const deleteItem = async (id: string) => {
         if (!user) return;
+
+        if (isDemo) {
+            setItems(prev => prev.filter(i => i.id !== id));
+            toast.success("Item deleted (Demo)");
+            return;
+        }
+
         const item = items.find(i => i.id === id);
         if (!item) return;
 
         try {
             // Pack full item into blob for trash
-            const encryptedBlob = packItemBlob(item);
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            const encryptedBlob = await packItemBlob(item, vaultKey);
 
             // @ts-ignore
             const { error: trashError } = await supabase
@@ -374,7 +467,8 @@ export function useVaultTrash() {
 
             if (error) throw error;
 
-            const parsed = (data || []).map(parseTrashItem);
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            const parsed = await Promise.all((data || []).map(item => parseTrashItem(item, vaultKey)));
             setTrashItems(parsed);
         } catch (err: any) {
             setError(err.message);
@@ -403,7 +497,8 @@ export function useVaultTrash() {
             // Actually, we should probably keep usage history etc.
 
             // Re-pack blob from trash item details
-            const blob = packItemBlob(trashItem);
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            const blob = await packItemBlob(trashItem, vaultKey);
 
             const insertPayload: Database['public']['Tables']['vault_items']['Insert'] = {
                 user_id: user.id,
@@ -415,7 +510,8 @@ export function useVaultTrash() {
                 encrypted_blob: blob,
                 created_at: trashItem.createdAt, // Preserve original creation?
                 updated_at: new Date().toISOString(), // New update time?
-                has_totp: !!trashItem.totpSecret
+                has_totp: !!trashItem.totpSecret,
+                encryption_version: 1
             };
 
             // @ts-ignore

@@ -9,11 +9,47 @@ export type Json =
 export interface Database {
     public: {
         Tables: {
+            notifications: {
+                Row: {
+                    id: string
+                    user_id: string
+                    type: 'critical' | 'warning' | 'info' | 'success'
+                    title: string
+                    description: string | null
+                    is_read: boolean
+                    created_at: string
+                    action_link: string | null
+                    action_label: string | null
+                }
+                Insert: {
+                    id?: string
+                    user_id: string
+                    type: 'critical' | 'warning' | 'info' | 'success'
+                    title: string
+                    description?: string | null
+                    is_read?: boolean
+                    created_at?: string
+                    action_link?: string | null
+                    action_label?: string | null
+                }
+                Update: {
+                    id?: string
+                    user_id?: string
+                    type?: 'critical' | 'warning' | 'info' | 'success'
+                    title?: string
+                    description?: string | null
+                    is_read?: boolean
+                    created_at?: string
+                    action_link?: string | null
+                    action_label?: string | null
+                }
+            }
             profiles: {
                 Row: {
                     id: string
                     username: string
                     display_name: string
+                    avatar_url: string | null
                     mfa_enabled: boolean | null
                     mfa_type: 'totp' | 'email' | null
                     created_at: string
@@ -23,6 +59,7 @@ export interface Database {
                     id: string
                     username: string
                     display_name: string
+                    avatar_url?: string | null
                     mfa_enabled?: boolean | null
                     mfa_type?: 'totp' | 'email' | null
                     created_at?: string
@@ -32,6 +69,7 @@ export interface Database {
                     id?: string
                     username?: string
                     display_name?: string
+                    avatar_url?: string | null
                     mfa_enabled?: boolean | null
                     mfa_type?: 'totp' | 'email' | null
                     created_at?: string

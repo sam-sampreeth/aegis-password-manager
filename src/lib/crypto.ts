@@ -475,3 +475,76 @@ export async function importVault(jsonString: string, password: string): Promise
     }
 }
 
+/**
+ * Generic encrypt string data with a hex key (AES-GCM)
+ */
+export async function encryptData(text: string, keyHex: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+
+    // Import key
+    const keyBuffer = new Uint8Array(keyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        keyBuffer,
+        'AES-GCM',
+        false,
+        ['encrypt']
+    );
+
+    // Generate random IV
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+
+    // Encrypt
+    const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        cryptoKey,
+        data
+    );
+
+    // Combine IV + encrypted data
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv, 0);
+    combined.set(new Uint8Array(encrypted), iv.length);
+
+    // Convert to hex
+    return Array.from(combined, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Generic decrypt string data with a hex key (AES-GCM)
+ */
+export async function decryptData(encryptedHex: string, keyHex: string): Promise<string | null> {
+    try {
+        // Import key
+        const keyBuffer = new Uint8Array(keyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+        const cryptoKey = await crypto.subtle.importKey(
+            'raw',
+            keyBuffer,
+            'AES-GCM',
+            false,
+            ['decrypt']
+        );
+
+        // Convert hex to buffer
+        const combined = new Uint8Array(encryptedHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+
+        // Extract IV and encrypted data
+        const iv = combined.slice(0, 12);
+        const encrypted = combined.slice(12);
+
+        // Decrypt
+        const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            cryptoKey,
+            encrypted
+        );
+
+        // Convert to string
+        const decoder = new TextDecoder();
+        return decoder.decode(decrypted);
+    } catch (error) {
+        console.error('Decryption failed:', error);
+        return null;
+    }
+}
