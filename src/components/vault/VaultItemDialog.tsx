@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import * as OTPAuth from "otpauth";
 import { Button } from "@/components/ui/button";
@@ -13,21 +13,29 @@ import {
     Edit2,
     Save,
     RefreshCw,
-    Clock,
+
+    Plus,
+    X,
     Check,
     ShieldCheck,
     Hash,
     ChevronDown,
     Trash2,
     Globe,
-    Star
+    Star,
+    FileText,
+    QrCode
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { VaultItemIcon } from "./VaultItemIcon";
 import { generatePassword, evaluateStrength, getStrengthColor } from "@/lib/passwordUtils";
 import { VaultItem } from "@/hooks/useVault";
-
-
+import { useClipboard } from "@/context/ClipboardContext";
+import { useUserSettings } from "@/hooks/useProfiles";
+import { decryptData } from "@/lib/crypto";
+import { useAuth } from "@/context/AuthContext";
+import { scanQrCode, extractTotpSecret } from "@/lib/qrUtils";
+import { toast } from "sonner";
 
 interface VaultItemDialogProps {
     item: VaultItem | null;
@@ -38,14 +46,6 @@ interface VaultItemDialogProps {
     onToggleFavorite?: (id: string) => void;
     onSave?: (item: Partial<VaultItem>) => Promise<void>;
 }
-
-const PRESET_USERNAMES = [
-    "sam@example.com",
-    "sam.smith@work.com",
-    "sampreethhhh",
-    "admin",
-    "root"
-];
 
 const CATEGORIES: VaultItem['category'][] = ["Social", "Work", "Finance", "Entertainment", "Other"];
 
@@ -58,6 +58,7 @@ const categoryColorMap: Record<string, string> = {
 };
 
 export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete, onToggleFavorite, onSave }: VaultItemDialogProps) {
+    const { settings } = useUserSettings();
     const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -65,7 +66,59 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
     const [showPassword, setShowPassword] = useState(false);
     const [showTotp, setShowTotp] = useState(false);
     const [copiedField, setCopiedField] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const result = await scanQrCode(file);
+            const secret = extractTotpSecret(result);
+
+            if (secret) {
+                setFormData(prev => ({ ...prev, totpSecret: secret }));
+                toast.success("TOTP secret extracted successfully!");
+            } else {
+                toast.error("Could not find a valid TOTP secret in this QR code.");
+            }
+        } catch (error) {
+            console.error(error);
+            toast.error(error instanceof Error ? error.message : "Failed to scan QR code");
+        } finally {
+            // Reset input so the same file can be uploaded again
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
     const [totpProgress, setTotpProgress] = useState(30);
+    const { isDemo } = useAuth();
+    const [decryptedPresets, setDecryptedPresets] = useState<string[]>([]);
+
+    useEffect(() => {
+        const loadPresets = async () => {
+            if (!settings?.username_presets) {
+                setDecryptedPresets([]);
+                return;
+            }
+            if (isDemo) {
+                setDecryptedPresets(settings.username_presets);
+                return;
+            }
+            const vaultKey = sessionStorage.getItem('vaultKey');
+            if (vaultKey) {
+                const decrypted = await Promise.all(settings.username_presets.map(async (p) => {
+                    const d = await decryptData(p, vaultKey);
+                    return d || p;
+                }));
+                // Filter distinct
+                setDecryptedPresets([...new Set(decrypted)]);
+            }
+        };
+        loadPresets();
+    }, [settings?.username_presets, isDemo]);
+
+    const [decryptedNotes, setDecryptedNotes] = useState<string>("");
 
     // Form State (Controlled)
     const [formData, setFormData] = useState({
@@ -74,44 +127,68 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
         password: "",
         category: "Other",
         tags: "",
-        url: "",
-        totpSecret: ""
+        urls: [""],
+        totpSecret: "",
+        notes: ""
     });
 
     // Reset state when dialog opens/closes
     useEffect(() => {
-        if (!open) {
-            setIsEditing(false);
-            setShowPassword(false);
-            setShowTotp(false);
-        } else {
-            if (isCreating) {
-                setIsEditing(true);
-                // Reset form for new item
-                setFormData({
-                    name: "",
-                    username: "",
-                    password: "",
-                    category: "Other",
-                    tags: "",
-                    url: "",
-                    totpSecret: ""
-                });
-            } else if (item) {
+        const initForm = async () => {
+            if (!open) {
                 setIsEditing(false);
-                // Pre-fill form for editing
-                setFormData({
-                    name: item.name,
-                    username: item.username,
-                    password: item.password,
-                    category: item.category,
-                    tags: item.tags?.join(", ") || "",
-                    url: item.urls?.[0] || "",
-                    totpSecret: item.totpSecret || ""
-                });
+                setShowPassword(false);
+                setShowTotp(false);
+                setDecryptedNotes("");
+            } else {
+                if (isCreating) {
+                    setIsEditing(true);
+                    // Reset form for new item
+                    setFormData({
+                        name: "",
+                        username: "",
+                        password: "",
+                        category: "Other",
+                        tags: "",
+                        urls: [""],
+                        totpSecret: "",
+                        notes: ""
+                    });
+                    setDecryptedNotes("");
+                } else if (item) {
+                    setIsEditing(false);
+
+                    // Handle Decryption
+                    let notes = item.notes || "";
+                    const vaultKey = sessionStorage.getItem('vaultKey');
+
+                    if (notes && !isDemo && vaultKey) {
+                        try {
+                            const decrypted = await decryptData(notes, vaultKey);
+                            if (decrypted) notes = decrypted;
+                        } catch (e) {
+                            console.error("Failed to decrypt notes:", e);
+                        }
+                    }
+
+                    setDecryptedNotes(notes);
+
+                    // Pre-fill form for editing
+                    setFormData({
+                        name: item.name,
+                        username: item.username,
+                        password: item.password,
+                        category: item.category,
+                        tags: item.tags?.join(", ") || "",
+                        urls: item.urls && item.urls.length > 0 ? item.urls : [""],
+                        totpSecret: item.totpSecret || "",
+                        notes: notes
+                    });
+                }
             }
-        }
-    }, [open, item?.id, isCreating]);
+        };
+        initForm();
+    }, [open, item?.id, isCreating, isDemo]);
 
     // Real TOTP Generation
     const [totpCode, setTotpCode] = useState<string>("--- ---");
@@ -159,8 +236,10 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
         setFormData(prev => ({ ...prev, password: newPass }));
     };
 
+    const { copyToClipboard: secureCopy } = useClipboard();
+
     const copyToClipboard = (text: string, field: string) => {
-        navigator.clipboard.writeText(text);
+        secureCopy(text, field === "username" ? "Username" : field === "password" ? "Password" : "Link");
         setCopiedField(field);
         setTimeout(() => setCopiedField(null), 2000);
     };
@@ -176,7 +255,7 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
         username: formData.username,
         password: formData.password,
         category: formData.category,
-        urls: [],
+        urls: formData.urls.filter(u => u.trim() !== ""),
         favorite: false,
         folderId: "",
         strength: 0,
@@ -403,8 +482,16 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+                            )}
 
-
+                            {/* Notes Section - View Mode */}
+                            {decryptedNotes && (
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-neutral-500 uppercase tracking-wider font-semibold">Secret Notes</Label>
+                                    <div className="p-4 bg-zinc-900/50 border border-white/5 rounded-lg text-sm text-neutral-300 whitespace-pre-wrap font-sans leading-relaxed">
+                                        {decryptedNotes}
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -440,16 +527,52 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                         </DropdownMenuContent>
                                     </DropdownMenu>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>Website URL</Label>
-                                    <div className="relative">
-                                        <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
-                                        <Input
-                                            value={formData.url}
-                                            onChange={(e) => setFormData({ ...formData, url: e.target.value })}
-                                            className="bg-zinc-900 border-white/10 pl-9"
-                                            placeholder="https://example.com"
-                                        />
+                                <div className="space-y-3">
+                                    <Label className="flex justify-between items-center">
+                                        Websites
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 text-[10px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 p-1 px-2"
+                                            onClick={() => setFormData(prev => ({ ...prev, urls: [...prev.urls, ""] }))}
+                                        >
+                                            <Plus className="w-3 h-3 mr-1" />
+                                            ADD URL
+                                        </Button>
+                                    </Label>
+                                    <div className="space-y-2">
+                                        {formData.urls.map((url, idx) => (
+                                            <div key={idx} className="flex gap-2">
+                                                <div className="relative flex-1">
+                                                    <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+                                                    <Input
+                                                        value={url}
+                                                        onChange={(e) => {
+                                                            const newUrls = [...formData.urls];
+                                                            newUrls[idx] = e.target.value;
+                                                            setFormData({ ...formData, urls: newUrls });
+                                                        }}
+                                                        className="bg-zinc-900 border-white/10 pl-9"
+                                                        placeholder="https://example.com"
+                                                    />
+                                                </div>
+                                                {formData.urls.length > 1 && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-10 w-10 text-neutral-500 hover:text-red-400 hover:bg-red-400/10"
+                                                        onClick={() => {
+                                                            const newUrls = formData.urls.filter((_, i) => i !== idx);
+                                                            setFormData({ ...formData, urls: newUrls });
+                                                        }}
+                                                    >
+                                                        <X className="w-4 h-4" />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
@@ -470,11 +593,17 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                             </Button>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-[200px]">
-                                            {PRESET_USERNAMES.map(u => (
-                                                <DropdownMenuItem key={u} onClick={() => setFormData({ ...formData, username: u })}>
-                                                    {u}
-                                                </DropdownMenuItem>
-                                            ))}
+                                            {decryptedPresets.length > 0 ? (
+                                                decryptedPresets.map(u => (
+                                                    <DropdownMenuItem key={u} onClick={() => setFormData({ ...formData, username: u })}>
+                                                        {u}
+                                                    </DropdownMenuItem>
+                                                ))
+                                            ) : (
+                                                <div className="p-2 text-xs text-neutral-500 text-center">
+                                                    No presets. Add them in Settings.
+                                                </div>
+                                            )}
                                         </DropdownMenuContent>
                                     </DropdownMenu>
                                 </div>
@@ -516,8 +645,25 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                             <div className="space-y-2">
                                 <Label className="flex justify-between items-center">
                                     TOTP Secret
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 text-[10px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 p-1 px-2"
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <QrCode className="w-3 h-3 mr-1" />
+                                        SCAN QR CODE
+                                    </Button>
                                     <span className="text-xs text-neutral-500 font-normal">Optional (Base32)</span>
                                 </Label>
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    className="hidden"
+                                    accept="image/*"
+                                    onChange={handleQrUpload}
+                                />
                                 <div className="flex items-center gap-2 border border-white/10 rounded-md bg-zinc-900 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500/50">
                                     <ShieldCheck className="w-4 h-4 text-neutral-500" />
                                     <input
@@ -538,6 +684,25 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                         value={formData.tags}
                                         onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
                                         placeholder="Comma separated (e.g. work, social)"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="flex justify-between items-center">
+                                    Notes
+                                    <span className="text-[10px] text-blue-400/50 flex items-center gap-1 font-normal">
+                                        <ShieldCheck className="w-3 h-3" />
+                                        CLIENT-SIDE ENCRYPTED
+                                    </span>
+                                </Label>
+                                <div className="flex items-start gap-2 border border-white/10 rounded-md bg-zinc-900 px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500/50">
+                                    <FileText className="w-4 h-4 text-neutral-500 mt-1" />
+                                    <textarea
+                                        className="bg-transparent border-none outline-none text-sm w-full placeholder:text-neutral-600 font-sans min-h-[100px] resize-none"
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        placeholder="Add private notes... (Securely encrypted)"
                                     />
                                 </div>
                             </div>
@@ -580,11 +745,21 @@ export function VaultItemDialog({ item, open, onOpenChange, isCreating, onDelete
                                             username: formData.username,
                                             password: formData.password,
                                             category: formData.category as any,
-                                            urls: formData.url ? [formData.url] : [],
+                                            urls: formData.urls.filter(u => u.trim() !== ""),
                                             tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
                                             totpSecret: formData.totpSecret,
-                                            strength: strengthScore
+                                            strength: strengthScore,
+                                            notes: formData.notes
                                         };
+
+                                        // Encrypt notes if not in demo
+                                        if (!isDemo && payload.notes) {
+                                            const vaultKey = sessionStorage.getItem('vaultKey');
+                                            if (vaultKey) {
+                                                const { encryptData } = await import("@/lib/crypto");
+                                                payload.notes = await encryptData(payload.notes, vaultKey);
+                                            }
+                                        }
 
                                         if (onSave) {
                                             await onSave(payload);

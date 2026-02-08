@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
+
 import { VaultItemDialog } from "@/components/vault/VaultItemDialog";
 import {
     DropdownMenu,
@@ -26,19 +26,17 @@ import {
     Search,
     Plus,
     Filter,
-    MoreVertical,
     User,
     KeyRound,
     Unlock,
     Cloud,
     Check,
     ArrowUpDown,
-    SlidersHorizontal,
     X,
     Ghost,
-    Pencil,
-    Trash2,
-    Star
+    Copy,
+    Star,
+    SlidersHorizontal
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -46,8 +44,12 @@ import { VaultItemIcon } from "@/components/vault/VaultItemIcon";
 import { AdvancedFilterDialog, FilterState } from "@/components/vault/AdvancedFilterDialog";
 import { useVaultItems, VaultItem } from "@/hooks/useVault";
 import { useVaultActivity } from "@/hooks/useVaultActivity";
+import { useClipboard } from "@/context/ClipboardContext";
 
 const AnimatedFilterList = ({ categories, selectedCategory, onSelect, onAdvancedClick }: { categories: string[], selectedCategory: string, onSelect: (c: string) => void, onAdvancedClick: () => void }) => {
+    // ... (rest of the file until handleCreateNew)
+
+
     const specialFilters = ["All", "Favorites", "Weak"];
     const normalCategories = categories.filter(c => !specialFilters.includes(c));
 
@@ -95,6 +97,7 @@ const AnimatedFilterList = ({ categories, selectedCategory, onSelect, onAdvanced
 export default function VaultPage() {
     const { items: vaultItems, loading: itemsLoading, addItem, updateItem, deleteItem } = useVaultItems();
     const { logActivity } = useVaultActivity();
+    const { copyToClipboard } = useClipboard();
 
     const [selectedCategory, setSelectedCategory] = useState<string>("All");
     const [sortOption, setSortOption] = useState<"edited" | "created" | "name">("edited");
@@ -127,6 +130,19 @@ export default function VaultPage() {
     // Keyboard Shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            // Check if active element is an input-like element
+            const target = e.target as HTMLElement;
+            const tagName = target.tagName ? target.tagName.toUpperCase() : "";
+
+            if (
+                tagName === "INPUT" ||
+                tagName === "TEXTAREA" ||
+                target.isContentEditable ||
+                isDialogOpen // Disable shortcuts if dialog is open
+            ) {
+                return;
+            }
+
             // Search shortcut: / or Ctrl+K
             if (e.key === "/" || (e.ctrlKey && e.key === "k")) {
                 e.preventDefault();
@@ -136,7 +152,7 @@ export default function VaultPage() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, []);
+    }, [isDialogOpen]); // Re-bind when dialog state changes
 
     // Advanced Filter State
     const [isAdvancedFilterOpen, setIsAdvancedFilterOpen] = useState(false);
@@ -298,7 +314,8 @@ export default function VaultPage() {
             favorite: false,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            history: []
+            history: [],
+            version: 1
         };
         setSelectedItem(newItem);
         setIsCreating(true);
@@ -315,11 +332,7 @@ export default function VaultPage() {
         }
     };
 
-    const handleDelete = (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-        setItemToDelete(id);
-        setIsDeleteAlertOpen(true);
-    };
+
 
     const confirmDelete = async () => {
         if (itemToDelete) {
@@ -572,8 +585,10 @@ export default function VaultPage() {
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: idx * 0.03 }}
-                                    className="group flex items-center justify-between p-3 rounded-lg border border-white/5 bg-zinc-900/30 hover:bg-zinc-900/80 hover:border-blue-500/20 transition-all cursor-pointer"
+                                    className="group flex items-center justify-between p-3 rounded-lg border border-white/5 bg-zinc-900/30 transition-all cursor-pointer hover:bg-zinc-900/80 hover:border-transparent hover:shadow-[0_0_0_1px_rgba(59,130,246,0.5)] relative overflow-hidden"
                                 >
+                                    <div className="absolute inset-0 rounded-lg pointer-events-none transition-all duration-300 opacity-0 group-hover:opacity-100 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-blue-500/20" style={{ padding: '1px', zIndex: -1, margin: '-1px' }} />
+                                    <div className="absolute inset-0 rounded-lg bg-zinc-900/95 -z-10" />
                                     <div className="flex items-center gap-4 min-w-0 flex-1">
                                         <div className="relative shrink-0">
                                             <VaultItemIcon item={item} className="w-10 h-10 rounded-lg" />
@@ -591,11 +606,24 @@ export default function VaultPage() {
                                     {/* Desktop Columns */}
                                     <div className="hidden md:flex items-center gap-8 mr-8">
                                         <div className="w-32 truncate text-right">
-                                            <Badge variant="outline" className="bg-white/5 border-white/5 text-neutral-400 font-normal hover:bg-white/10">
-                                                {item.category}
-                                            </Badge>
+                                            {(() => {
+                                                const categoryColors: Record<string, string> = {
+                                                    "Work": "bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20",
+                                                    "Personal": "bg-purple-500/10 text-purple-400 border-purple-500/20 hover:bg-purple-500/20",
+                                                    "Social": "bg-pink-500/10 text-pink-400 border-pink-500/20 hover:bg-pink-500/20",
+                                                    "Finance": "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20",
+                                                    "Entertainment": "bg-orange-500/10 text-orange-400 border-orange-500/20 hover:bg-orange-500/20",
+                                                    "Other": "bg-zinc-500/10 text-zinc-400 border-zinc-500/20 hover:bg-zinc-500/20",
+                                                };
+                                                const colorClass = categoryColors[item.category] || categoryColors["Other"];
+                                                return (
+                                                    <Badge variant="outline" className={`${colorClass} font-normal transition-colors`}>
+                                                        {item.category}
+                                                    </Badge>
+                                                );
+                                            })()}
                                         </div>
-                                        <div className="w-24 text-right text-xs text-neutral-600 font-mono">
+                                        <div className="w-24 text-right text-xs text-neutral-400 font-mono">
                                             {new Date(item.updatedAt).toLocaleDateString()}
                                         </div>
                                     </div>
@@ -614,32 +642,33 @@ export default function VaultPage() {
 
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
-                                                <Button size="icon" variant="ghost" className="h-8 w-8 text-neutral-400 hover:text-white" onClick={(e) => e.stopPropagation()}>
-                                                    <MoreVertical className="w-4 h-4" />
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-8 px-2 text-neutral-400 hover:text-white hover:bg-white/10 gap-2"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    <Copy className="w-4 h-4" />
+                                                    <span className="text-xs font-medium">Copy</span>
                                                 </Button>
                                             </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-48 bg-zinc-950 border-white/10 text-white">
-                                                <DropdownMenuItem onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    navigator.clipboard.writeText(item.username);
-                                                    toast.success("Username copied");
-                                                }}>
-                                                    <User className="w-4 h-4 mr-2" /> Copy Username
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    navigator.clipboard.writeText(item.password);
-                                                    toast.success("Password copied");
-                                                }}>
-                                                    <KeyRound className="w-4 h-4 mr-2" /> Copy Password
-                                                </DropdownMenuItem>
-                                                <DropdownMenuSeparator className="bg-white/10" />
-                                                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleItemClick(item); }}>
-                                                    <Pencil className="w-4 h-4 mr-2" /> Edit
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem onClick={(e) => handleDelete(e, item.id)} className="text-red-400 focus:text-red-400">
-                                                    <Trash2 className="w-4 h-4 mr-2" /> Delete
-                                                </DropdownMenuItem>
+                                            <DropdownMenuContent align="end" className="w-48 bg-zinc-950 border-white/10 text-white z-[60]">
+                                                {item.username && (
+                                                    <DropdownMenuItem onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        copyToClipboard(item.username, "Username");
+                                                    }}>
+                                                        <User className="w-4 h-4 mr-2 text-neutral-400" /> Copy Username
+                                                    </DropdownMenuItem>
+                                                )}
+                                                {item.password && (
+                                                    <DropdownMenuItem onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        copyToClipboard(item.password, "Password");
+                                                    }}>
+                                                        <KeyRound className="w-4 h-4 mr-2 text-neutral-400" /> Copy Password
+                                                    </DropdownMenuItem>
+                                                )}
                                             </DropdownMenuContent>
                                         </DropdownMenu>
                                     </div>
@@ -704,6 +733,6 @@ export default function VaultPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
-        </div>
+        </div >
     )
 }

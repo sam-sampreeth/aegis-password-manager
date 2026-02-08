@@ -17,8 +17,8 @@ export function useVaultActivity() {
         try {
             // Optimistic update (optional, but good for UI)
             // But for now, let's just insert
-            const { error } = await supabase
-                .from('vault_activity')
+            const { error } = await (supabase
+                .from('vault_activity') as any)
                 .insert({
                     user_id: user.id,
                     event_type: eventType,

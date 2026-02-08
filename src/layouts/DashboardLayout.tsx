@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Sidebar, SidebarBody, SidebarLink } from "@/components/ui/sidebar";
 import { Link, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -41,6 +42,31 @@ function DashboardContent() {
             navigate("/auth");
         }
     }, [authLoading, user, navigate]);
+
+    // Persistent Demo Toast
+    useEffect(() => {
+        if (user?.id === "demo-user") {
+            // Check if toast already exists to avoid duplicates? 
+            // Sonner might handle this, or we can just fire it. 
+            // Setting a unique ID prevents duplicates.
+            toast("Demo Mode Active", {
+                id: "demo-mode-toast",
+                description: "Master Password: demo123",
+                duration: Infinity,
+                action: {
+                    label: "Dismiss",
+                    onClick: () => {
+                        // Optional: Allow dismissal but maybe remember it? 
+                        // For now just dismiss.
+                    }
+                },
+                className: "bg-blue-900/20 border-blue-500/20 text-blue-200"
+            });
+        } else {
+            // Dismiss if not demo (e.g. logout/login)
+            toast.dismiss("demo-mode-toast");
+        }
+    }, [user]);
 
     if (authLoading) {
         return (
