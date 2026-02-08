@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from 'react'
-import { motion } from 'framer-motion'
 
 /**
  * DecryptedText
@@ -43,11 +42,9 @@ export default function DecryptedText({
     characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+',
     className = '',
     parentClassName = '',
-    encryptedClassName = '',
     animateOn = 'hover',
 }: DecryptedTextProps) {
     const [displayText, setDisplayText] = useState<string>(text)
-    const [isHovering, setIsHovering] = useState<boolean>(false)
     const intervalRef = useRef<number | null>(null)
 
     useEffect(() => {
@@ -68,7 +65,7 @@ export default function DecryptedText({
             setDisplayText(
                 text
                     .split('')
-                    .map((char, index) => {
+                    .map((_, index) => {
                         if (index < iter) {
                             return text[index];
                         }
@@ -90,13 +87,7 @@ export default function DecryptedText({
             className={parentClassName}
             onMouseEnter={() => {
                 if (animateOn === 'hover') {
-                    setIsHovering(true)
                     scramble()
-                }
-            }}
-            onMouseLeave={() => {
-                if (animateOn === 'hover') {
-                    setIsHovering(false)
                 }
             }}
         >
