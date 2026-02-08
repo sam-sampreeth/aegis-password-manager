@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from "react";
-import { Settings, Shield, HardDrive, Bell, Download, Upload, AlertTriangle, Lock, RefreshCw, Smartphone, KeyRound, Loader2, Activity, Eye, EyeOff, Check, Copy } from "lucide-react";
+import { Settings, Shield, HardDrive, Bell, Download, Upload, AlertTriangle, Lock, RefreshCw, Smartphone, KeyRound, Loader2, Activity, Eye, EyeOff, Check, Copy, Plus, X, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,17 +31,134 @@ import { useVaultActivity } from "@/hooks/useVaultActivity";
 import { useUserSettings } from "@/hooks/useProfiles";
 import { useVaultItems } from "@/hooks/useVault";
 import { supabase } from "@/lib/supabase";
-import { deriveMasterKey, decryptVaultKey, generateRecoveryCodeData, exportVault, importVault, generateSalt, encryptVaultKey } from "@/lib/crypto";
+import { deriveMasterKey, decryptVaultKey, generateRecoveryCodeData, exportVault, importVault, generateSalt, encryptVaultKey, encryptData, decryptData } from "@/lib/crypto";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { useClipboard } from "@/context/ClipboardContext";
+import { useAuth } from "@/context/AuthContext";
+
+
 
 export default function SettingsPage() {
     const { lockVault } = useLock();
     const { activities, logActivity } = useVaultActivity();
-    const { settings, loading: settingsLoading, updateSettings } = useUserSettings();
+    const { settings, updateSettings } = useUserSettings();
     const { items: vaultItems, importItems, clearVault } = useVaultItems();
+    const { copyToClipboard } = useClipboard();
+    const { isDemo, user } = useAuth();
     const [autoLockTimer, setAutoLockTimer] = useState(15); // 0 = Never
+
+    const PresetBadge = ({ encryptedPreset, onRemove }: { encryptedPreset: string, onRemove: () => void }) => {
+        const [decrypted, setDecrypted] = useState(encryptedPreset);
+
+        useEffect(() => {
+            const load = async () => {
+                if (isDemo) {
+                    setDecrypted(encryptedPreset);
+                    return;
+                }
+                const vaultKey = sessionStorage.getItem('vaultKey');
+                if (vaultKey) {
+                    const d = await decryptData(encryptedPreset, vaultKey);
+                    if (d) setDecrypted(d);
+                }
+            };
+            load();
+        }, [encryptedPreset]);
+
+        return (
+            <Badge
+                variant="secondary"
+                className="px-3 py-1.5 text-sm bg-zinc-950 border border-white/10 hover:border-white/20 transition-colors flex items-center gap-2 group"
+            >
+                {decrypted}
+                <button
+                    onClick={onRemove}
+                    className="text-neutral-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all focus:opacity-100 focus:outline-none"
+                    aria-label={`Remove preset ${decrypted}`}
+                >
+                    <X className="w-3.5 h-3.5" />
+                </button>
+            </Badge>
+        );
+    };
+
+    // Username Presets State
+    const [newPreset, setNewPreset] = useState("");
+
+    const handleAddPreset = async () => {
+        if (!newPreset.trim()) return;
+        const vaultKey = sessionStorage.getItem('vaultKey');
+        if (!vaultKey && !isDemo) {
+            toast.error("Vault locked. Please unlock to add presets.");
+            return;
+        }
+
+        if (isDemo && settings?.username_presets?.includes(newPreset)) return; // No-op check
+
+        const currentPresets = settings?.username_presets || [];
+
+        // Check for duplicates (requires decrypting existing or just simple check if we trust unique?
+        // Simple check won't work if they are encrypted. We should decrypt all to check duplicate?
+        // For now, let's just add it. The UI list will show duplicates if they exist, but user can remove them.
+        // Or we can try to decrypt to check.
+        // Let's decrypt to check duplicates.
+        try {
+            let decryptedPresets: string[] = [];
+            if (isDemo) {
+                decryptedPresets = currentPresets;
+            } else {
+                decryptedPresets = await Promise.all(currentPresets.map(async p => {
+                    const d = await decryptData(p, vaultKey!);
+                    return d || p; // Fallback to raw if fail
+                }));
+            }
+
+            if (decryptedPresets.includes(newPreset)) {
+                toast.error("Preset already exists");
+                return;
+            }
+
+            const encryptedPreset = isDemo ? newPreset : await encryptData(newPreset, vaultKey!);
+            const updated = [...currentPresets, encryptedPreset];
+
+            const { error } = await (supabase
+                .from('user_settings') as any)
+                .update({ username_presets: updated })
+                .eq('user_id', user!.id);
+
+            if (error) throw error;
+
+            // Optimistic update (requires re-fetch usually, but let's try to update local state if hook supports it or just wait for re-fetch)
+            // useProfiles hook re-fetches on updateSettings call (via updateSettings function)
+            // Wait, I called supabase directly above. I should use updateSettings from hook if possible, but I used supabase directly to handle the cast.
+            // useProfiles updateSettings handles the optimistic update. I should use that instead.
+            // Let's use updateSettings from hook.
+            // @ts-ignore
+            await updateSettings({ username_presets: updated });
+
+
+            setNewPreset("");
+            toast.success("Preset added");
+        } catch (error) {
+            console.error("Failed to add preset:", error);
+            toast.error("Failed to add preset");
+        }
+    };
+
+    const handleRemovePreset = async (preset: string) => {
+        const currentPresets = settings?.username_presets || [];
+        const updated = currentPresets.filter(p => p !== preset);
+        try {
+            // @ts-ignore
+            await updateSettings({ username_presets: updated });
+            toast.success("Preset removed");
+        } catch (error) {
+            console.error("Failed to remove preset:", error);
+            toast.error("Failed to remove preset");
+        }
+    };
 
     // Sync autoLockTimer with database settings
     useEffect(() => {
@@ -162,6 +279,10 @@ export default function SettingsPage() {
     };
 
     const handleMfaEnroll = async () => {
+        if (isDemo) {
+            toast.error("Action not allowed in Demo Mode");
+            return;
+        }
         setMfaLoading(true);
         setMfaError("");
         try {
@@ -195,7 +316,7 @@ export default function SettingsPage() {
         setMfaLoading(true);
         setMfaError("");
         try {
-            const { data, error } = await supabase.auth.mfa.challengeAndVerify({
+            const { error } = await supabase.auth.mfa.challengeAndVerify({
                 factorId: mfaFactorId,
                 code: mfaCode
             });
@@ -203,6 +324,12 @@ export default function SettingsPage() {
             if (error) throw error;
 
             await logActivity('mfa_enabled', {});
+            // Sync Profile
+            await (supabase.from('profiles') as any).update({
+                mfa_enabled: true,
+                mfa_type: 'totp'
+            }).eq('id', (await supabase.auth.getUser()).data.user!.id);
+
             setMfaEnabled(true);
             setMfaStep('success');
         } catch (err: any) {
@@ -214,19 +341,25 @@ export default function SettingsPage() {
     };
 
     const handleMfaDisable = async () => {
+        if (isDemo) {
+            toast.error("Action not allowed in Demo Mode");
+            return;
+        }
         setMfaLoading(true);
         try {
-            // Verify master password first
-            if ((settings as any)?.encrypted_vault_key && (settings as any)?.vault_key_salt) {
-                // @ts-ignore
-                const masterKey = await deriveMasterKey(disableMfaPassword, (settings as any).vault_key_salt as string);
-                // @ts-ignore
-                const vaultKey = await decryptVaultKey((settings as any).encrypted_vault_key as string, masterKey);
-                if (!vaultKey) {
-                    toast.error("Incorrect master password");
-                    setMfaLoading(false);
-                    return;
-                }
+            // Verify AUTH password first (not master password)
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user?.email) throw new Error("User not found");
+
+            const { error: signInError } = await supabase.auth.signInWithPassword({
+                email: user.email,
+                password: disableMfaPassword,
+            });
+
+            if (signInError) {
+                toast.error("Incorrect login password");
+                setMfaLoading(false);
+                return;
             }
 
             const { data: factors } = await supabase.auth.mfa.listFactors();
@@ -238,6 +371,12 @@ export default function SettingsPage() {
                 });
                 if (error) throw error;
             }
+
+            // Sync Profile
+            await (supabase.from('profiles') as any).update({
+                mfa_enabled: false,
+                mfa_type: 'email'
+            }).eq('id', (await supabase.auth.getUser()).data.user!.id);
 
             await logActivity('mfa_disabled', {});
             setMfaEnabled(false);
@@ -265,31 +404,39 @@ export default function SettingsPage() {
     const passwordStrength = getPasswordStrength(newPassword);
     const isPasswordStrong = Object.values(passwordStrength).every(Boolean);
 
+    const isOauthUser = user?.identities?.every(id => id.provider !== 'email') ?? false;
+    const hasAuthPassword = !isOauthUser;
+
     const handleChangePassword = async () => {
+        if (isDemo) {
+            toast.error("Action not allowed in Demo Mode");
+            return;
+        }
         if (!isPasswordStrong) {
             toast.error("Please meet all password requirements");
             return;
         }
 
         try {
-            // First, verify the old password by reauthenticating
             const { data: { user } } = await supabase.auth.getUser();
             if (!user?.email) {
                 toast.error("User not found");
                 return;
             }
 
-            // Verify old password by attempting to sign in
-            const { error: signInError } = await supabase.auth.signInWithPassword({
-                email: user.email,
-                password: oldPassword,
-            });
-
-            if (signInError) {
-                toast.error("Current password is incorrect", {
-                    className: "!bg-red-600 !text-white !border-red-500 font-medium"
+            // Only verify old password if user actually has one (non-oauth-only)
+            if (hasAuthPassword) {
+                const { error: signInError } = await supabase.auth.signInWithPassword({
+                    email: user.email,
+                    password: oldPassword,
                 });
-                return;
+
+                if (signInError) {
+                    toast.error("Current password is incorrect", {
+                        className: "!bg-red-600 !text-white !border-red-500 font-medium"
+                    });
+                    return;
+                }
             }
 
             // Update to new password
@@ -315,6 +462,10 @@ export default function SettingsPage() {
     };
 
     const handleRegenerateCodes = async () => {
+        if (isDemo) {
+            toast.error("Action not allowed in Demo Mode");
+            return;
+        }
         if (!regenerateMasterPassword) {
             toast.error("Please enter your master password");
             return;
@@ -383,11 +534,13 @@ export default function SettingsPage() {
         }
     };
 
-    const handleTriggerReset = () => {
-        toast.success("Password reset email sent to your inbox");
-    };
+
 
     const handleDeleteAccount = async () => {
+        if (isDemo) {
+            toast.error("Action not allowed in Demo Mode");
+            return;
+        }
         try {
             // Verify master password by attempting decryption
             const { data: { user } } = await supabase.auth.getUser();
@@ -576,6 +729,10 @@ export default function SettingsPage() {
     };
 
     const handleImportExecute = async () => {
+        if (isDemo) {
+            toast.error("Action not allowed in Demo Mode");
+            return;
+        }
         try {
             if (importMode === 'replace') {
                 if (importConfirmText !== 'REPLACE MY VAULT') {
@@ -685,48 +842,60 @@ export default function SettingsPage() {
                             <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wider pl-1">Account Security</h2>
                             <div className="p-6 rounded-xl border border-white/5 bg-zinc-900/50 space-y-6">
                                 <h3 className="text-lg font-medium flex items-center gap-2">
-                                    <KeyRound className="w-5 h-5 text-blue-500" /> Auth Password
+                                    <KeyRound className="w-5 h-5 text-blue-500" /> {hasAuthPassword ? "Auth Password" : "Set Auth Password"}
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
-                                        <div className="text-sm text-neutral-400">Manage your login password</div>
-                                        <div className="text-xs text-neutral-500">Last changed: {getLastEventDate('auth_password_change')}</div>
+                                        <div className="text-sm text-neutral-400">
+                                            {hasAuthPassword
+                                                ? "Manage your login password"
+                                                : "Enable email login by setting a password"}
+                                        </div>
+                                        <div className="text-xs text-neutral-500">
+                                            {hasAuthPassword
+                                                ? `Last changed: ${getLastEventDate('auth_password_change')}`
+                                                : "No password set yet"}
+                                        </div>
                                     </div>
                                     <div className="flex flex-col gap-3">
                                         <Dialog open={isPasswordDialogOpen} onOpenChange={setIsPasswordDialogOpen}>
                                             <DialogTrigger asChild>
                                                 <Button variant="outline" className="w-full border-white/10 hover:bg-zinc-800">
-                                                    Change Password
+                                                    {hasAuthPassword ? "Change Password" : "Set Password"}
                                                 </Button>
                                             </DialogTrigger>
                                             <DialogContent className="bg-zinc-950 border-white/10 text-white sm:max-w-[425px]">
                                                 <DialogHeader>
-                                                    <DialogTitle>Change Password</DialogTitle>
+                                                    <DialogTitle>{hasAuthPassword ? "Change Password" : "Set Authentication Password"}</DialogTitle>
                                                     <DialogDescription className="text-neutral-400">
-                                                        Enter your current password and a new strong password.
+                                                        {hasAuthPassword
+                                                            ? "Enter your current password and a new strong password."
+                                                            : "Choose a strong password to enable email/password login."}
                                                     </DialogDescription>
                                                 </DialogHeader>
                                                 <div className="space-y-4 py-4">
-                                                    <div className="space-y-2">
-                                                        <Label>Current Password</Label>
-                                                        <div className="relative">
-                                                            <Input
-                                                                type={showOldPassword ? "text" : "password"}
-                                                                value={oldPassword}
-                                                                onChange={(e) => setOldPassword(e.target.value)}
-                                                                className="bg-zinc-900 border-white/10 pr-10"
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setShowOldPassword(!showOldPassword)}
-                                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
-                                                            >
-                                                                {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                                            </button>
+                                                    {hasAuthPassword && (
+                                                        <div className="space-y-2">
+                                                            <Label>Current Password</Label>
+                                                            <div className="relative">
+                                                                <Input
+                                                                    type={showOldPassword ? "text" : "password"}
+                                                                    value={oldPassword}
+                                                                    onChange={(e) => setOldPassword(e.target.value)}
+                                                                    className="bg-zinc-900 border-white/10 pr-10"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setShowOldPassword(!showOldPassword)}
+                                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
+                                                                >
+                                                                    {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                                </button>
+                                                            </div>
                                                         </div>
-                                                    </div>
+                                                    )}
                                                     <div className="space-y-2">
-                                                        <Label>New Password</Label>
+                                                        <Label>{hasAuthPassword ? "New Password" : "Password"}</Label>
                                                         <div className="relative">
                                                             <Input
                                                                 type={showNewPassword ? "text" : "password"}
@@ -777,7 +946,9 @@ export default function SettingsPage() {
                                                     </div>
                                                 </div>
                                                 <DialogFooter>
-                                                    <Button onClick={handleChangePassword} className="bg-blue-600 hover:bg-blue-700">Update Password</Button>
+                                                    <Button onClick={handleChangePassword} className="bg-blue-600 hover:bg-blue-700">
+                                                        {hasAuthPassword ? "Update Password" : "Set Password"}
+                                                    </Button>
                                                 </DialogFooter>
                                             </DialogContent>
                                         </Dialog>
@@ -889,20 +1060,44 @@ export default function SettingsPage() {
                                     <div className="space-y-3">
                                         <Label className="text-sm text-neutral-400">Lock Triggers</Label>
                                         <div className="flex items-center space-x-2">
-                                            <Checkbox id="lock-tab" defaultChecked className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white" />
+                                            <Checkbox
+                                                id="lock-tab"
+                                                checked={settings?.lock_on_tab_close ?? true}
+                                                onCheckedChange={async (checked) => {
+                                                    try {
+                                                        await updateSettings({ lock_on_tab_close: !!checked });
+                                                        toast.success(`Lock on tab close ${checked ? 'enabled' : 'disabled'}`);
+                                                    } catch (error) {
+                                                        toast.error("Failed to update setting");
+                                                    }
+                                                }}
+                                                className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white"
+                                            />
                                             <Label htmlFor="lock-tab" className="cursor-pointer">Lock when tab is closed</Label>
                                         </div>
                                         <div className="flex items-center space-x-2">
-                                            <Checkbox id="lock-sleep" defaultChecked className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white" />
+                                            <Checkbox
+                                                id="lock-sleep"
+                                                checked={settings?.lock_on_sleep ?? true}
+                                                onCheckedChange={async (checked) => {
+                                                    try {
+                                                        await updateSettings({ lock_on_sleep: !!checked });
+                                                        toast.success(`Lock on sleep ${checked ? 'enabled' : 'disabled'}`);
+                                                    } catch (error) {
+                                                        toast.error("Failed to update setting");
+                                                    }
+                                                }}
+                                                className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white"
+                                            />
                                             <Label htmlFor="lock-sleep" className="cursor-pointer">Lock when system sleeps</Label>
                                         </div>
                                     </div>
 
                                     <div className="h-px bg-white/5" />
 
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex items-center justify-between opacity-50 cursor-not-allowed" title="Coming Soon">
                                         <div className="space-y-0.5">
-                                            <Label className="text-base text-neutral-200">Clear Clipboard</Label>
+                                            <Label className="text-base text-neutral-200 cursor-not-allowed">Clear Clipboard (Coming Soon)</Label>
                                             <p className="text-sm text-neutral-500">
                                                 Clear copied passwords after 30 seconds.
                                                 <br />
@@ -911,7 +1106,11 @@ export default function SettingsPage() {
                                                 </span>
                                             </p>
                                         </div>
-                                        <Checkbox defaultChecked className="border-white/20 data-[state=checked]:bg-blue-600 data-[state=checked]:text-white" />
+                                        <Checkbox
+                                            checked={true}
+                                            disabled
+                                            className="border-white/20 data-[state=checked]:bg-zinc-700 data-[state=checked]:text-neutral-400 cursor-not-allowed"
+                                        />
                                     </div>
 
                                     <div className="pt-2 border-t border-white/5">
@@ -1148,8 +1347,8 @@ export default function SettingsPage() {
                                                                     const newEncryptedVaultKey = await encryptVaultKey(vaultKey, newMasterKey);
 
                                                                     // 3. Update Supabase
-                                                                    const { error } = await supabase
-                                                                        .from('user_settings')
+                                                                    const { error } = await (supabase
+                                                                        .from('user_settings') as any)
                                                                         .update({
                                                                             encrypted_vault_key: newEncryptedVaultKey,
                                                                             vault_key_salt: newSalt
@@ -1241,8 +1440,7 @@ export default function SettingsPage() {
                                                     variant="outline"
                                                     onClick={() => {
                                                         if (newRecoveryCodes) {
-                                                            navigator.clipboard.writeText(newRecoveryCodes.join('\n'));
-                                                            toast.success("All codes copied to clipboard");
+                                                            copyToClipboard(newRecoveryCodes.join('\n'), "Recovery Codes");
                                                         }
                                                     }}
                                                     className="border-white/10 hover:bg-zinc-800"
@@ -1286,7 +1484,6 @@ export default function SettingsPage() {
                                                 variant={mfaEnabled ? "destructive" : "default"}
                                                 size="sm"
                                                 onClick={() => handleMfaToggle(!mfaEnabled)}
-                                                className={mfaEnabled ? "bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/20" : ""}
                                             >
                                                 {mfaEnabled ? "Disable 2FA" : "Enable 2FA"}
                                             </Button>
@@ -1595,6 +1792,48 @@ export default function SettingsPage() {
                                 </div>
                             </div>
                         </div>
+                        {/* Username Presets */}
+                        <div className="space-y-4">
+                            <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wider pl-1">Username Presets</h2>
+                            <div className="p-6 rounded-xl border border-white/5 bg-zinc-900/50 space-y-6">
+                                <h3 className="text-lg font-medium flex items-center gap-2">
+                                    <User className="w-5 h-5 text-purple-400" /> Managed Presets
+                                </h3>
+
+                                <div className="space-y-4">
+                                    <div className="text-sm text-neutral-400">
+                                        Save frequently used usernames or emails to quickly fill them when adding new items.
+                                    </div>
+
+                                    <div className="flex gap-2 max-w-md">
+                                        <Input
+                                            placeholder="Add new preset (e.g. email@work.com)"
+                                            value={newPreset}
+                                            onChange={(e) => setNewPreset(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleAddPreset()}
+                                            className="bg-zinc-950 border-white/10"
+                                        />
+                                        <Button onClick={handleAddPreset} size="icon" className="shrink-0 bg-blue-600 hover:bg-blue-700">
+                                            <Plus className="w-4 h-4" />
+                                        </Button>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2 pt-2">
+                                        {settings?.username_presets?.map((preset) => (
+                                            <PresetBadge
+                                                key={preset}
+                                                encryptedPreset={preset}
+                                                onRemove={() => handleRemovePreset(preset)}
+                                            />
+                                        ))}
+                                        {(!settings?.username_presets || settings.username_presets.length === 0) && (
+                                            <span className="text-sm text-neutral-600 italic">No presets added yet.</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         {/* Security Activity */}
                         <div className="space-y-4">
                             <h2 className="text-sm font-medium text-neutral-400 uppercase tracking-wider pl-1">Security Activity</h2>
@@ -1928,8 +2167,7 @@ export default function SettingsPage() {
                                             variant="outline"
                                             className="shrink-0 border-white/10"
                                             onClick={() => {
-                                                navigator.clipboard.writeText(mfaSecret);
-                                                toast.success("Secret copied");
+                                                copyToClipboard(mfaSecret, "MFA Secret");
                                             }}
                                         >
                                             <Copy className="w-4 h-4" />
@@ -2027,13 +2265,13 @@ export default function SettingsPage() {
                                 <Shield className="w-5 h-5" /> Disable Two-Factor Authentication?
                             </DialogTitle>
                             <DialogDescription className="text-neutral-400">
-                                This will remove the extra layer of security from your account. Verify your master password to continue.
+                                This will remove the extra layer of security from your account. Verify your login password to continue.
                             </DialogDescription>
                         </DialogHeader>
 
                         <div className="space-y-4 py-4">
                             <div className="space-y-2">
-                                <Label>Master Password</Label>
+                                <Label>Login Password</Label>
                                 <Input
                                     type="password"
                                     value={disableMfaPassword}

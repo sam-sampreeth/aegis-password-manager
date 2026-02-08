@@ -16,6 +16,22 @@ export function useProfile() {
     useEffect(() => {
         if (!user) return;
 
+        // Demo Mode Check
+        // We can check user.id or a flag if we had one exposed in useAuth, 
+        // but user.id is "demo-user" as set in AuthContext.
+        if (user.id === "demo-user") {
+            setProfile({
+                id: "demo-user",
+                updated_at: new Date().toISOString(),
+                username: "demo_user",
+                display_name: "Demo User",
+                avatar_url: null,
+                website: null,
+            } as any);
+            setLoading(false);
+            return;
+        }
+
         const fetchProfile = async () => {
             try {
                 setLoading(true);
@@ -39,9 +55,14 @@ export function useProfile() {
 
     const updateProfile = async (updates: Database['public']['Tables']['profiles']['Update']) => {
         if (!user) return;
-        const { error } = await supabase
-            .from('profiles')
-            // @ts-ignore
+
+        if (user.id === "demo-user") {
+            setProfile((prev) => (prev ? { ...prev, ...updates } : null));
+            return;
+        }
+
+        const { error } = await (supabase
+            .from('profiles') as any)
             .update(updates)
             .eq('id', user.id);
         if (error) throw error;
@@ -59,6 +80,21 @@ export function useUserSettings() {
 
     useEffect(() => {
         if (!user) return;
+
+        if (user.id === "demo-user") {
+            setSettings({
+                user_id: "demo-user",
+                auto_lock_minutes: 15,
+                lock_on_tab_close: true,
+                lock_on_sleep: true,
+                clipboard_clear_seconds: 30,
+                notify_breach_alerts: true,
+                notify_password_reminders: true,
+                updated_at: new Date().toISOString()
+            } as UserSettings);
+            setLoading(false);
+            return;
+        }
 
         const fetchSettings = async () => {
             try {
@@ -84,7 +120,7 @@ export function useUserSettings() {
                                 clipboard_clear_seconds: 30,
                                 notify_breach_alerts: true,
                                 notify_password_reminders: true
-                            })
+                            } as any)
                             .select()
                             .single();
 
@@ -108,17 +144,40 @@ export function useUserSettings() {
 
     const updateSettings = async (updates: Database['public']['Tables']['user_settings']['Update']) => {
         if (!user) return;
-        const { error } = await supabase
-            .from('user_settings')
-            // @ts-ignore
-            .update(updates)
+
+        if (user.id === "demo-user") {
+            setSettings((prev) => (prev ? { ...prev, ...updates } : null));
+            return;
+        }
+
+        // Remove undefined values to avoid sending them to Supabase
+        const cleanUpdates = Object.fromEntries(
+            Object.entries(updates).filter(([_, v]) => v !== undefined)
+        );
+
+        const { error } = await (supabase
+            .from('user_settings') as any)
+            .update(cleanUpdates)
             .eq('user_id', user.id);
 
         if (error) {
             console.error("Error updating settings:", error);
             throw error;
         }
-        setSettings((prev) => (prev ? { ...prev, ...updates } : null));
+
+        // Fetch fresh data to ensure we are in sync
+        const { data: freshSettings } = await supabase
+            .from('user_settings')
+            .select('*')
+            .eq('user_id', user.id)
+            .single();
+
+        if (freshSettings) {
+            setSettings(freshSettings);
+        } else {
+            // Fallback to optimistic
+            setSettings((prev) => (prev ? { ...prev, ...updates } : null));
+        }
     };
 
     return { settings, loading, error, updateSettings };
