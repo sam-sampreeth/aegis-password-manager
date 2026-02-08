@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { generateVaultKey, generateSalt, deriveMasterKey, encryptVaultKey, generateRecoveryCodeData } from "@/lib/crypto";
+import { useClipboard } from "@/context/ClipboardContext";
 
 // Types
 type Step = "CREDENTIALS" | "PROFILE" | "MASTER_PASSWORD" | "BACKUP_CODES";
@@ -272,7 +273,8 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
                     encrypted_vault_key: encryptedVaultKey,
                     vault_key_salt: salt,
                     encrypted_recovery_codes: recoveryCodesJson,
-                });
+                    clipboard_clear_seconds: 0, // Disabled by default
+                } as any);
 
             if (settingsError) throw settingsError;
 
@@ -283,7 +285,7 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
                     id: authData.user.id,
                     display_name: formData.name,
                     username: formData.username,
-                });
+                } as any);
 
             if (profileError) {
                 console.error("Profile update error:", profileError);
@@ -295,7 +297,7 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
             sessionStorage.removeItem('tempRecoveryData');
 
             // 7. Log recovery codes generation
-            await supabase.from('vault_activity').insert({
+            await (supabase.from('vault_activity') as any).insert({
                 user_id: authData.user.id,
                 event_type: 'recovery_codes_generated',
                 metadata: { timestamp: new Date().toISOString() }
@@ -311,11 +313,12 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
         }
     };
 
+    const { copyToClipboard: secureCopy } = useClipboard();
+
     const copyToClipboard = () => {
         const text = `Aegis Backup Codes:\n${backupCodes.join("\n")}`;
-        navigator.clipboard.writeText(text);
+        secureCopy(text, "Backup Codes");
         setCopiedCodes(true);
-        toast.success("Codes copied to clipboard");
     };
 
     const renderStep = () => {

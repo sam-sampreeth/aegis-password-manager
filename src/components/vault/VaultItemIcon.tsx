@@ -23,14 +23,25 @@ export const VaultItemIcon = ({ item, className = "w-10 h-10" }: {
     const getFaviconUrl = (urls: string[]) => {
         if (!urls || urls.length === 0) return null;
         try {
-            // Try to add https:// if missing for URL parsing
             let urlStr = urls[0];
+            if (!urlStr) return null;
+
+            // Handle incomplete URLs gracefully
             if (!urlStr.startsWith("http")) {
                 urlStr = "https://" + urlStr;
             }
-            const domain = new URL(urlStr).hostname;
+
+            const url = new URL(urlStr);
+            const domain = url.hostname;
+
+            // Ensure we have a valid domain before making requests
+            if (!domain || domain.length < 3 || !domain.includes('.')) {
+                return null;
+            }
+
             return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
         } catch (e) {
+            // Silently fail for invalid URLs during typing
             return null;
         }
     };

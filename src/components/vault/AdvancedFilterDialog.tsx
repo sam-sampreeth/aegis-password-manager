@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
@@ -206,7 +205,7 @@ export function AdvancedFilterDialog({ open, onOpenChange, onApply, currentFilte
                                         initialFocus
                                         mode="range"
                                         defaultMonth={localFilters.dateRange?.from}
-                                        selected={localFilters.dateRange}
+                                        selected={localFilters.dateRange as any}
                                         onSelect={(range) => setLocalFilters(prev => ({ ...prev, dateRange: range as any }))}
                                         numberOfMonths={2}
                                         className="bg-zinc-950 text-white"
