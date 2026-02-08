@@ -21,7 +21,8 @@ export default function AuthPage() {
     // Determine mode from URL
     const isSignup = location.pathname.includes("/signup");
     const isForgot = location.pathname.includes("/forgot-password");
-    const isLogin = !isSignup && !isForgot;
+    const isReset = location.pathname.includes("/reset-password");
+    const isLogin = !isSignup && !isForgot && !isReset;
 
     // Check for demo param
     useEffect(() => {
@@ -265,12 +266,14 @@ export default function AuthPage() {
                     {!isForgot && !showMfa && (
                         <div className="flex flex-col space-y-2 text-center">
                             <h1 className="text-2xl font-semibold tracking-tight">
-                                {isLogin ? "Welcome back" : "Create an account"}
+                                {isLogin ? "Welcome back" : isReset ? "Reset Password" : "Create an account"}
                             </h1>
                             <p className="text-sm text-muted-foreground">
                                 {isLogin
                                     ? "Enter your credentials to access your vault"
-                                    : "Follow the steps to secure your new vault"}
+                                    : isReset
+                                        ? "Create a new strong password for your account"
+                                        : "Follow the steps to secure your new vault"}
                             </p>
                         </div>
                     )}
@@ -282,8 +285,11 @@ export default function AuthPage() {
                                 navigate("/auth");
                             }}
                         />
-                    ) : isForgot ? (
-                        <ForgotPasswordWizard onBackToLogin={() => navigate("/auth")} />
+                    ) : isForgot || isReset ? (
+                        <ForgotPasswordWizard
+                            onBackToLogin={() => navigate("/auth")}
+                            initialStep={isReset ? "NEW_PASSWORD" : "EMAIL_INPUT"}
+                        />
                     ) : showMfa ? (
                         <motion.div
                             initial={{ opacity: 0, scale: 0.95 }}

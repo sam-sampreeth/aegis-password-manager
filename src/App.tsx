@@ -28,6 +28,7 @@ function App() {
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/auth/signup" element={<AuthPage />} />
         <Route path="/auth/forgot-password" element={<AuthPage />} />
+        <Route path="/auth/reset-password" element={<AuthPage />} />
 
         {/* Dashboard (Protected) */}
         <Route element={<DashboardLayout />}>

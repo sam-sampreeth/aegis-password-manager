@@ -4,29 +4,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, ArrowRight, ShieldAlert, Mail, CheckCircle2, Loader2, Eye, EyeOff, Check } from "lucide-react";
-import ReCAPTCHA from "react-google-recaptcha";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
 
-type WizardStep = "EMAIL_INPUT" | "OTP_VERIFICATION" | "NEW_PASSWORD" | "SUCCESS";
+type WizardStep = "EMAIL_INPUT" | "OTP_VERIFICATION" | "MFA_VERIFICATION" | "NEW_PASSWORD" | "SUCCESS";
 
 interface ForgotPasswordWizardProps {
     onBackToLogin: () => void;
+    initialStep?: WizardStep;
 }
 
-export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProps) {
-    const [step, setStep] = useState<WizardStep>("EMAIL_INPUT");
+export function ForgotPasswordWizard({ onBackToLogin, initialStep = "EMAIL_INPUT" }: ForgotPasswordWizardProps) {
+    const [step, setStep] = useState<WizardStep>(initialStep);
     const [email, setEmail] = useState("");
     const [otp, setOtp] = useState("");
     const [password, setPassword] = useState("");
+    const [mfaOtp, setMfaOtp] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const [captchaToken, setCaptchaToken] = useState<string | null>(null);
 
     // Focus management for OTP
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
     useEffect(() => {
-        if (step === "OTP_VERIFICATION") {
+        if (step === "OTP_VERIFICATION" || step === "MFA_VERIFICATION") {
             // Focus first input on mount
             setTimeout(() => {
                 inputRefs.current[0]?.focus();
@@ -50,11 +51,11 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
     const handleOtpChange = (index: number, value: string) => {
         if (value.length > 1) {
             // Handle paste via change event if it slips through
-            const pastedData = value.slice(0, 6);
+            const pastedData = value.slice(0, 8);
             setOtp(pastedData);
-            inputRefs.current[Math.min(5, pastedData.length - 1)]?.focus();
+            inputRefs.current[Math.min(7, pastedData.length - 1)]?.focus();
 
-            if (pastedData.length === 6) {
+            if (pastedData.length === 8) {
                 verifyOtp(pastedData);
             }
             return;
@@ -63,15 +64,15 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
         if (!/^\d*$/.test(value)) return;
 
         const newOtp = otp.split("");
-        // Ensure array is size 6
-        while (newOtp.length < 6) newOtp.push("");
+        // Ensure array is size 8
+        while (newOtp.length < 8) newOtp.push("");
 
         newOtp[index] = value;
-        const finalOtp = newOtp.join("").slice(0, 6);
+        const finalOtp = newOtp.join("").slice(0, 8);
         setOtp(finalOtp);
 
         // Move to next input if value is entered
-        if (value && index < 5) {
+        if (value && index < 7) {
             inputRefs.current[index + 1]?.focus();
         }
     };
@@ -85,12 +86,12 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
 
     const handleOtpPaste = (e: React.ClipboardEvent) => {
         e.preventDefault();
-        const pastedData = e.clipboardData.getData("text/plain").slice(0, 6).replace(/\D/g, "");
+        const pastedData = e.clipboardData.getData("text/plain").slice(0, 8).replace(/\D/g, "");
         if (pastedData) {
             setOtp(pastedData);
-            inputRefs.current[Math.min(5, pastedData.length - 1)]?.focus();
+            inputRefs.current[Math.min(7, pastedData.length - 1)]?.focus();
 
-            if (pastedData.length === 6) {
+            if (pastedData.length === 8) {
                 verifyOtp(pastedData);
             }
         }
@@ -98,35 +99,107 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
 
     const handleEmailSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!email || !captchaToken) return;
+        if (!email) return;
 
         setIsLoading(true);
-        // Simulate network request
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        try {
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: window.location.origin + "/auth/reset-password",
+            });
 
-        toast.success("Recovery code sent to your email");
-        setStep("OTP_VERIFICATION");
-        setIsLoading(false);
+            if (error) throw error;
+
+            toast.success("Recovery code sent to your email");
+            setStep("OTP_VERIFICATION");
+        } catch (error: any) {
+            toast.error(error.message || "Failed to send reset link");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const verifyOtp = async (code: string) => {
-        if (code.length < 6) {
-            toast.error("Please enter a valid 6-digit code");
+        if (code.length < 8) {
+            toast.error("Please enter a valid 8-digit code");
             return;
         }
 
         setIsLoading(true);
-        // Simulate verification
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        try {
+            const { error } = await supabase.auth.verifyOtp({
+                email,
+                token: code,
+                type: 'recovery',
+            });
 
-        toast.success("Identity verified");
-        setStep("NEW_PASSWORD");
-        setIsLoading(false);
+            if (error) throw error;
+
+            // Check if MFA is required
+            const { data: aalData, error: aalError } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+            if (aalError) throw aalError;
+
+            if (aalData?.nextLevel === 'aal2' || aalData?.currentLevel === 'aal1') {
+                // Check if user has MFA factors
+                const { data: factors, error: factorsError } = await supabase.auth.mfa.listFactors();
+                if (factorsError) throw factorsError;
+
+                const totpFactor = factors.totp[0];
+                if (totpFactor) {
+                    toast.success("Email verified. Please verify your identity with MFA.");
+                    setStep("MFA_VERIFICATION");
+                    setIsLoading(false);
+                    return;
+                }
+            }
+
+            toast.success("Identity verified");
+            setStep("NEW_PASSWORD");
+        } catch (error: any) {
+            toast.error(error.message || "Invalid or expired code");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const verifyMfa = async (code: string) => {
+        if (code.length < 6) return;
+
+        setIsLoading(true);
+        try {
+            const { data: factors } = await supabase.auth.mfa.listFactors();
+            const factor = factors?.totp[0];
+            if (!factor) throw new Error("No MFA factor found");
+
+            const { data: challenge, error: challengeError } = await supabase.auth.mfa.challenge({
+                factorId: factor.id
+            });
+            if (challengeError) throw challengeError;
+
+            const { error: verifyError } = await supabase.auth.mfa.verify({
+                factorId: factor.id,
+                challengeId: challenge.id,
+                code
+            });
+
+            if (verifyError) throw verifyError;
+
+            toast.success("MFA verified");
+            setStep("NEW_PASSWORD");
+        } catch (error: any) {
+            toast.error(error.message || "Invalid MFA code");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const handleOtpSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         verifyOtp(otp);
+    };
+
+    const handleMfaSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        verifyMfa(mfaOtp);
     };
 
     const handlePasswordSubmit = async (e: React.FormEvent) => {
@@ -138,12 +211,20 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
         }
 
         setIsLoading(true);
-        // Simulate password reset
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        try {
+            const { error } = await supabase.auth.updateUser({
+                password: password
+            });
 
-        toast.success("Password reset successfully");
-        setStep("SUCCESS");
-        setIsLoading(false);
+            if (error) throw error;
+
+            toast.success("Password updated successfully");
+            setStep("SUCCESS");
+        } catch (error: any) {
+            toast.error(error.message || "Failed to update password");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -196,19 +277,11 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
                                 </div>
                             </div>
 
-                            <div className="flex justify-center">
-                                <ReCAPTCHA
-                                    sitekey="6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI"
-                                    onChange={setCaptchaToken}
-                                    theme="dark"
-                                />
-                            </div>
-
                             <div className="flex gap-3">
                                 <Button type="button" variant="ghost" onClick={onBackToLogin} className="w-1/3" disabled={isLoading}>
                                     Cancel
                                 </Button>
-                                <Button type="submit" className="flex-1" disabled={isLoading || !captchaToken}>
+                                <Button type="submit" className="flex-1" disabled={isLoading}>
                                     {isLoading ? (
                                         <>
                                             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -237,15 +310,15 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
                         <div className="space-y-2 text-center">
                             <h2 className="text-2xl font-semibold tracking-tight">Check your Inbox</h2>
                             <p className="text-sm text-neutral-400">
-                                We sent a 6-digit code to <span className="text-white">{email}</span>
+                                We sent an 8-digit code to <span className="text-white">{email}</span>
                             </p>
                         </div>
 
                         <form onSubmit={handleOtpSubmit} className="space-y-6">
                             <div className="space-y-2">
                                 <Label htmlFor="otp-0">Verification Code</Label>
-                                <div className="flex gap-2 justify-center" onPaste={handleOtpPaste}>
-                                    {[0, 1, 2, 3, 4, 5].map((index) => (
+                                <div className="flex gap-1.5 justify-center" onPaste={handleOtpPaste}>
+                                    {[0, 1, 2, 3, 4, 5, 6, 7].map((index) => (
                                         <Input
                                             key={index}
                                             id={`otp-${index}`}
@@ -253,7 +326,7 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
                                             type="text"
                                             inputMode="numeric"
                                             maxLength={1}
-                                            className="w-12 h-14 text-center text-xl font-mono p-0"
+                                            className="w-10 h-12 text-center text-xl font-mono p-0"
                                             value={otp[index] || ""}
                                             onChange={(e) => handleOtpChange(index, e.target.value)}
                                             onKeyDown={(e) => handleOtpKeyDown(index, e)}
@@ -281,6 +354,82 @@ export function ForgotPasswordWizard({ onBackToLogin }: ForgotPasswordWizardProp
                                     ) : (
                                         <>
                                             Verify
+                                            <ArrowRight className="w-4 h-4 ml-2" />
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
+                        </form>
+                    </motion.div>
+                )}
+
+                {step === "MFA_VERIFICATION" && (
+                    <motion.div
+                        key="mfa"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-6"
+                    >
+                        <div className="space-y-2 text-center">
+                            <h2 className="text-2xl font-semibold tracking-tight">Security Check</h2>
+                            <p className="text-sm text-neutral-400">
+                                Enter the 6-digit code from your authenticator app
+                            </p>
+                        </div>
+
+                        <form onSubmit={handleMfaSubmit} className="space-y-6">
+                            <div className="space-y-2">
+                                <Label htmlFor="mfa-0">2FA Code</Label>
+                                <div className="flex gap-2 justify-center">
+                                    {[0, 1, 2, 3, 4, 5].map((index) => (
+                                        <Input
+                                            key={index}
+                                            id={`mfa-${index}`}
+                                            ref={(el) => { if (index === 0) inputRefs.current[0] = el }}
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={1}
+                                            className="w-12 h-14 text-center text-xl font-mono p-0"
+                                            value={mfaOtp[index] || ""}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (!/^\d*$/.test(val)) return;
+                                                const newMfa = mfaOtp.split("");
+                                                newMfa[index] = val;
+                                                const finalMfa = newMfa.join("").slice(0, 6);
+                                                setMfaOtp(finalMfa);
+                                                if (val && index < 5) {
+                                                    (document.getElementById(`mfa-${index + 1}`) as HTMLInputElement)?.focus();
+                                                }
+                                                if (finalMfa.length === 6) verifyMfa(finalMfa);
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Backspace" && !mfaOtp[index] && index > 0) {
+                                                    (document.getElementById(`mfa-${index - 1}`) as HTMLInputElement)?.focus();
+                                                }
+                                            }}
+                                            autoComplete="one-time-code"
+                                            disabled={isLoading}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <Button type="button" variant="ghost" onClick={() => setStep("OTP_VERIFICATION")} className="w-1/3" disabled={isLoading}>
+                                    <ArrowLeft className="w-4 h-4 mr-2" />
+                                    Back
+                                </Button>
+                                <Button type="submit" className="flex-1" disabled={isLoading || mfaOtp.length < 6}>
+                                    {isLoading ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                            Verifying...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Verify MFA
                                             <ArrowRight className="w-4 h-4 ml-2" />
                                         </>
                                     )}

@@ -1,6 +1,6 @@
 
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
 import {
@@ -26,6 +26,7 @@ import {
 export function ProfileCompletionDialog() {
     const { user, loading: authLoading } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const [open, setOpen] = useState(false);
     const [step, setStep] = useState(1); // 1: Username, 2: Master Password, 3: Success
 
@@ -41,6 +42,17 @@ export function ProfileCompletionDialog() {
     useEffect(() => {
         if (authLoading || !user || user.id === "demo-user") {
             setChecking(false);
+            return;
+        }
+
+        // Don't show if we are in the middle of a wizard on AuthPage
+        const isAuthWizard = location.pathname.includes("/signup") ||
+            location.pathname.includes("/forgot-password") ||
+            location.pathname.includes("/reset-password");
+
+        if (isAuthWizard) {
+            setChecking(false);
+            setOpen(false);
             return;
         }
 

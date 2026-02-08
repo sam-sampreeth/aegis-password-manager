@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { motion, AnimatePresence } from "framer-motion";
-import { ShieldAlert, Copy, Check, ArrowRight, KeyRound, Eye, EyeOff } from "lucide-react";
+import { ShieldAlert, Copy, Check, ArrowRight, KeyRound, Eye, EyeOff, ArrowLeft, Mail, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -12,7 +12,7 @@ import { generateVaultKey, generateSalt, deriveMasterKey, encryptVaultKey, gener
 import { useClipboard } from "@/context/ClipboardContext";
 
 // Types
-type Step = "CREDENTIALS" | "PROFILE" | "MASTER_PASSWORD" | "BACKUP_CODES";
+type Step = "CREDENTIALS" | "PROFILE" | "MASTER_PASSWORD" | "BACKUP_CODES" | "EMAIL_VERIFICATION";
 
 interface SignUpWizardProps {
     initialStep?: Step;
@@ -31,6 +31,11 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
         username: "",
         masterPassword: "",
     });
+    const [signupOtp, setSignupOtp] = useState("");
+    const [isLoading, setIsLoading] = useState(false);
+    const [userId, setUserId] = useState<string | null>(null);
+    const [skipTimer, setSkipTimer] = useState(15);
+    const [canSkip, setCanSkip] = useState(false);
 
     // Validations & UI State
     const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -79,6 +84,21 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
         }
         if (step === "BACKUP_CODES") {
             generateBackupCodes();
+        }
+        if (step === "EMAIL_VERIFICATION") {
+            setCanSkip(false);
+            setSkipTimer(15);
+            const timer = setInterval(() => {
+                setSkipTimer((prev) => {
+                    if (prev <= 1) {
+                        clearInterval(timer);
+                        setCanSkip(true);
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+            return () => clearInterval(timer);
         }
     }, [step]);
 
@@ -228,7 +248,7 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
                 email: formData.email,
                 password: formData.password,
                 options: {
-                    emailRedirectTo: undefined, // Disable confirmation emails
+                    emailRedirectTo: window.location.origin + "/auth",
                     data: {
                         display_name: formData.name,
                         username: formData.username,
@@ -240,6 +260,57 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
 
             if (!authData.user) throw new Error("User creation failed");
 
+            setUserId(authData.user.id);
+
+            // Move to email verification step
+            toast.success("Verification code sent to your email");
+            setStep("EMAIL_VERIFICATION");
+
+        } catch (error: any) {
+            console.error("Registration error:", error);
+            toast.error(error.message || "Registration failed");
+        }
+    };
+
+    const verifySignupOtp = async (code: string) => {
+        if (code.length < 8) {
+            toast.error("Please enter a valid 8-digit code");
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            const { data, error } = await supabase.auth.verifyOtp({
+                email: formData.email,
+                token: code,
+                type: 'signup',
+            });
+
+            if (error) throw error;
+            if (!data.user) throw new Error("Verification failed");
+
+            toast.success("Email verified successfully");
+            await completeRegistration(data.user.id);
+        } catch (error: any) {
+            toast.error(error.message || "Invalid or expired code");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSkipVerification = async () => {
+        if (!userId) {
+            toast.error("User ID not found. Please try signing up again.");
+            return;
+        }
+
+        toast.info("Skipping verification. You can verify your email later in Settings.");
+        await completeRegistration(userId);
+    };
+
+    const completeRegistration = async (userId: string) => {
+        try {
+            setIsLoading(true);
             // 2. Generate and encrypt vault key
             let vaultKey = sessionStorage.getItem('tempVaultKey');
             if (!vaultKey) {
@@ -269,7 +340,7 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
             const { error: settingsError } = await supabase
                 .from('user_settings')
                 .upsert({
-                    user_id: authData.user.id,
+                    user_id: userId,
                     encrypted_vault_key: encryptedVaultKey,
                     vault_key_salt: salt,
                     encrypted_recovery_codes: recoveryCodesJson,
@@ -282,7 +353,7 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
             const { error: profileError } = await supabase
                 .from('profiles')
                 .upsert({
-                    id: authData.user.id,
+                    id: userId,
                     display_name: formData.name,
                     username: formData.username,
                 } as any);
@@ -298,7 +369,7 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
 
             // 7. Log recovery codes generation
             await (supabase.from('vault_activity') as any).insert({
-                user_id: authData.user.id,
+                user_id: userId,
                 event_type: 'recovery_codes_generated',
                 metadata: { timestamp: new Date().toISOString() }
             });
@@ -307,9 +378,11 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
             navigate("/vault");
 
         } catch (error: any) {
-            console.error("Registration error:", error);
-            toast.error(error.message || "Registration failed");
-            sessionStorage.removeItem('tempVaultKey');
+            console.error("Completion error:", error);
+            toast.error("Account verified but profile setup failed. Please try logging in.");
+            navigate("/auth");
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -590,14 +663,114 @@ export function SignUpWizard({ initialStep = "CREDENTIALS", onBackToLogin }: Sig
                         </div>
                     </motion.div>
                 );
+            case "EMAIL_VERIFICATION":
+                return (
+                    <motion.div
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        className="space-y-6"
+                    >
+                        <div className="space-y-2 text-center">
+                            <div className="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <Mail className="w-6 h-6 text-blue-500" />
+                            </div>
+                            <h2 className="text-2xl font-semibold tracking-tight">Verify your email</h2>
+                            <p className="text-sm text-neutral-400 text-center">
+                                We've sent an 8-digit code to <span className="text-white font-medium">{formData.email}</span>
+                            </p>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div className="space-y-2">
+                                <Label>Verification Code</Label>
+                                <div className="flex gap-2 justify-center">
+                                    {[0, 1, 2, 3, 4, 5, 6, 7].map((index) => (
+                                        <Input
+                                            key={index}
+                                            id={`otp-${index}`}
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={1}
+                                            className="w-10 h-12 text-center text-xl font-mono p-0"
+                                            value={signupOtp[index] || ""}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (!/^\d*$/.test(val)) return;
+                                                const newOtp = signupOtp.split("");
+                                                newOtp[index] = val;
+                                                const finalOtp = newOtp.join("").slice(0, 8);
+                                                setSignupOtp(finalOtp);
+                                                if (val && index < 7) {
+                                                    (document.getElementById(`otp-${index + 1}`) as HTMLInputElement)?.focus();
+                                                }
+                                                if (finalOtp.length === 8) verifySignupOtp(finalOtp);
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Backspace" && !signupOtp[index] && index > 0) {
+                                                    (document.getElementById(`otp-${index - 1}`) as HTMLInputElement)?.focus();
+                                                }
+                                            }}
+                                            autoComplete="one-time-code"
+                                            disabled={isLoading}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+
+                            <Button
+                                className="w-full"
+                                disabled={isLoading || signupOtp.length < 8}
+                                onClick={() => verifySignupOtp(signupOtp)}
+                            >
+                                {isLoading ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        Verifying...
+                                    </>
+                                ) : (
+                                    <>
+                                        Verify Email
+                                        <ArrowRight className="w-4 h-4 ml-2" />
+                                    </>
+                                )}
+                            </Button>
+
+                            {canSkip ? (
+                                <Button
+                                    variant="outline"
+                                    className="w-full border-blue-500/50 text-blue-400 hover:bg-blue-500/10 transition-all duration-300 animate-in fade-in slide-in-from-bottom-2"
+                                    onClick={handleSkipVerification}
+                                    disabled={isLoading}
+                                >
+                                    Skip for now (Verify Later)
+                                </Button>
+                            ) : (
+                                <p className="text-xs text-center text-neutral-500 transition-all duration-300">
+                                    Not receiving the code? Skip in {skipTimer}s
+                                </p>
+                            )}
+
+                            <Button
+                                variant="ghost"
+                                className="w-full"
+                                onClick={() => setStep("PROFILE")}
+                                disabled={isLoading}
+                            >
+                                <ArrowLeft className="w-4 h-4 mr-2" />
+                                Back
+                            </Button>
+                        </div>
+                    </motion.div>
+                );
         }
     };
 
     return (
         <div className="w-full max-w-sm mx-auto">
             <div className="mb-8 flex items-center justify-center gap-2">
-                {[1, 2, 3, 4].map((i) => {
-                    const stepIdx = ["CREDENTIALS", "PROFILE", "MASTER_PASSWORD", "BACKUP_CODES"].indexOf(step) + 1;
+                {[1, 2, 3, 4, 5].map((i) => {
+                    const stepIdx = ["CREDENTIALS", "PROFILE", "MASTER_PASSWORD", "BACKUP_CODES", "EMAIL_VERIFICATION"].indexOf(step) + 1;
                     return (
                         <div
                             key={i}
