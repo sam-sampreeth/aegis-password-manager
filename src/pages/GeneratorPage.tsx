@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 import { generatePassword, evaluateStrength } from "@/lib/passwordUtils";
+import { useClipboard } from "@/context/ClipboardContext";
 
 export default function GeneratorPage() {
     const [password, setPassword] = useState("");
@@ -20,13 +21,15 @@ export default function GeneratorPage() {
     });
     const [copied, setCopied] = useState(false);
 
+    const { copyToClipboard } = useClipboard();
+
     // Regenerate on change
     useEffect(() => {
         setPassword(generatePassword(length, options));
     }, [length, options]);
 
     const handleCopy = () => {
-        navigator.clipboard.writeText(password);
+        copyToClipboard(password, "Password");
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };

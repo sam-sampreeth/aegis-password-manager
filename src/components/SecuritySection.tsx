@@ -1,4 +1,4 @@
-import { Lock, EyeOff, FileKey, Github, Terminal } from "lucide-react";
+import { Lock, EyeOff, FileKey, Github } from "lucide-react";
 import { motion } from "framer-motion";
 import GlareHover from "@/components/reactbits/GlareHover";
 
@@ -73,7 +73,7 @@ export function SecuritySection() {
                         </GlareHover>
                     </motion.div>
 
-                    {/* Side Card 1 - Zero Knowledge */}
+                    {/* Side Card 1 - Pure Zero Knowledge */}
                     <motion.div
                         initial={{ opacity: 0, x: 20 }}
                         whileInView={{ opacity: 1, x: 0 }}
@@ -92,15 +92,15 @@ export function SecuritySection() {
                                     <EyeOff className="w-5 h-5 text-blue-400 group-hover:opacity-0 absolute transition-opacity duration-300" />
                                     <Lock className="w-5 h-5 text-blue-400 opacity-0 group-hover:opacity-100 absolute transition-opacity duration-300" />
                                 </div>
-                                <h3 className="text-xl font-bold text-white mb-2">Zero Knowledge</h3>
+                                <h3 className="text-xl font-bold text-white mb-2">Zero-Knowledge</h3>
                                 <p className="text-neutral-500 text-sm group-hover:text-neutral-400 transition-colors">
-                                    We don't know your master password. We can't see your data. Even if we wanted to.
+                                    We don't know your master password. We can't see your data (even if we wanted to.)
                                 </p>
                             </div>
                         </GlareHover>
                     </motion.div>
 
-                    {/* Side Card 2 - Local First */}
+                    {/* Side Card 2 - Secure Storage */}
                     <motion.div
                         initial={{ opacity: 0, x: 20 }}
                         whileInView={{ opacity: 1, x: 0 }}
@@ -118,9 +118,9 @@ export function SecuritySection() {
                                 <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-4 group-hover:shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-shadow">
                                     <FileKey className="w-5 h-5 text-blue-400" />
                                 </div>
-                                <h3 className="text-xl font-bold text-white mb-2">Local-First</h3>
+                                <h3 className="text-xl font-bold text-white mb-2">Secure Storage</h3>
                                 <p className="text-neutral-500 text-sm group-hover:text-neutral-400 transition-colors">
-                                    Encryption happens on your device. Only encrypted blobs are sent to our cloud.
+                                    Your encrypted vault is stored using Supabase with Row Level Security (RLS) policies.
                                 </p>
                             </div>
                         </GlareHover>
@@ -161,7 +161,7 @@ export function SecuritySection() {
                                 </div>
 
                                 <a
-                                    href="https://github.com"
+                                    href="https://github.com/sam-sampreeth/aegis-password-manager"
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="flex-shrink-0 inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-medium hover:bg-neutral-200 transition-colors"

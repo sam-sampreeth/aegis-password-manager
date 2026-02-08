@@ -12,6 +12,7 @@ import SettingsPage from "./pages/SettingsPage"
 import NotificationsPage from "./pages/NotificationsPage"
 import { DashboardLayout } from "./layouts/DashboardLayout"
 import { Toaster } from "@/components/ui/sonner"
+import { ProfileCompletionDialog } from "./components/auth/ProfileCompletionDialog"
 
 function App() {
   return (
@@ -39,6 +40,7 @@ function App() {
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Routes>
+      <ProfileCompletionDialog />
       <Toaster />
     </BrowserRouter>
   )

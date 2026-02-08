@@ -92,9 +92,9 @@ export default function LandingPage() {
                                         <ArrowRight className="ml-2 w-5 h-5 transition-transform group-hover/cta:translate-x-1" />
                                     </Button>
                                 </Link>
-                                <Link to="/#features">
+                                <Link to="/auth?demo=true">
                                     <Button size="lg" variant="outline" className="rounded-full text-lg px-8 py-7 border-neutral-700 hover:bg-neutral-800 text-neutral-300 transition-all hover:scale-105 cursor-target cursor-none">
-                                        Learn More
+                                        Try Demo
                                     </Button>
                                 </Link>
                             </div>

@@ -1,36 +1,36 @@
-import { KeyRound, Gauge, Tags, BadgeAlert, GlobeLock, Search } from "lucide-react";
+import { ShieldCheck, Activity, Cloud, Link as LinkIcon, Wand2, Search } from "lucide-react";
 import SpotlightCard from "@/components/reactbits/SpotlightCard";
 
 const features = [
     {
-        icon: KeyRound,
-        title: "Password Generator",
-        description: "Create strong, random passwords customized for each account or website."
+        icon: ShieldCheck,
+        title: "Integrated Authenticator",
+        description: "Store and generate 2FA tokens (TOTP) directly within your vault entries. No separate app required."
     },
     {
-        icon: Gauge,
-        title: "Strength Meter",
-        description: "Get instant feedback on password strength to avoid weak or reused ones."
+        icon: Activity,
+        title: "Security Action Center",
+        description: "Get a comprehensive health report of your vault. Instantly identify weak, reused, or compromised passwords."
     },
     {
-        icon: Tags,
-        title: "Smart Tagging",
-        description: "Organize logins with custom tags like Work or Personal for faster access and cleaner sorting."
+        icon: Cloud,
+        title: "Cloud Sync & OAuth",
+        description: "Sync your encrypted vault across all devices. Sign in securely using your GitHub or Google accounts."
     },
     {
-        icon: BadgeAlert,
-        title: "Multi-Factor Authentication",
-        description: "Secure your vault with a verification code from your authenticator app or trusted device."
+        icon: LinkIcon,
+        title: "Multiple URLs per Entry",
+        description: "Manage complex accounts by adding multiple domains and login pages to a single password entry."
     },
     {
-        icon: GlobeLock,
-        title: "Zero-Knowledge Encryption",
-        description: "Your data is encrypted with AES-256 and decrypted only on your device - never accessible to anyone else."
+        icon: Wand2,
+        title: "Advanced Generator",
+        description: "Create uncrackable, random passwords with custom lengths and character requirements in one click."
     },
     {
         icon: Search,
-        title: "Smart Search & Filters",
-        description: "Find entries instantly using global search or filters by tag, username, or site name."
+        title: "Power Search & Filters",
+        description: "Navigate thousands of entries instantly with smart tagging and multi-dimensional advanced filtering."
     },
 ];
 
