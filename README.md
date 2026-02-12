@@ -1,67 +1,113 @@
 # Aegis Password Manager
 
-Aegis is a modern, zero-knowledge password manager designed for security, privacy, and visual excellence. All encryption and decryption happen client-side, ensuring your master password and vault keys never leave your browser.
+Aegis is a modern, **zero knowledge** password manager built with a strong focus on **security**, **privacy**, and refined user experience. All encryption and decryption occur client-side, ensuring that your master password and vault keys never leave your browser.
 
-## Core Security
+## Security Architecture
 
-- **Zero-Knowledge Architecture:** No password hashes or sensitive keys are stored on our servers.
-- **AES-256-GCM Encryption:** All vault data is encrypted using industry-standard AES-256-GCM before being synced to the cloud.
-- **Master Key Derivation:** Uses PBKDF2 with high iterations and unique salts to derive strong master keys from your password.
-- **Recovery System:** Generates 10 unique, cryptographic recovery codes for independent vault access if you forget your master password.
+### Zero Knowledge Design
+- No password hashes, master keys, or decrypted vault data are stored on the server.
+- The backend only stores encrypted data.
 
-## Key Features
+### AES-256-GCM Encryption
+- All vault entries are encrypted using **AES-256-GCM** before being synchronized to the cloud.
 
-- **Integrated TOTP Authenticator:** Store 2FA seeds and generate time-based one-time passwords directly within Aegis.
-- **Multiple URL Support:** Link several domains to a single set of credentials for maximum flexibility.
-- **Secure Synchronization:** Real-time cloud sync with Supabase, protected by client-side encryption.
-- **Advanced Metadata:** Track creation dates, version history, and item strength in a unified dashboard.
-- **Account Sovereignty:** Full support for account deletion and data export in secure JSON format.
+### Secure Key Derivation
+- Master keys are derived using **PBKDF2** with high iteration counts and unique salts to protect against brute-force attacks.
 
-## Tech Stack
+### Recovery System
+- Each account generates **10 unique cryptographically secure recovery codes** that allow independent vault access if the master password is lost.
 
-- **Frontend:** React, TypeScript, Vite
-- **Styling:** Vanilla CSS, Tailwind CSS, Framer Motion
-- **UI Components:** ShadCn UI, Aceternity UI, Radix UI, Lucide Icons
-- **Backend:** Supabase (Auth & Database)
-- **Encryption:** Web Crypto API
+## Features
+
+- **Integrated TOTP Authenticator**  
+  Store 2FA secrets and generate time-based one-time passwords directly inside Aegis.
+
+- **Multiple URL Support**  
+  Associate multiple domains with a single credential entry.
+
+- **Secure Cloud Synchronization**  
+  Encrypted vault data is synced in real time using **Supabase**.
+
+- **Advanced Metadata Tracking**  
+  Track creation timestamps, version history, password strength, and item activity within a unified dashboard.
+
+- **Account Control**  
+  Supports secure account deletion and encrypted JSON data export.
+
+## Technology Stack
+
+### Frontend
+- React
+- TypeScript
+- Vite
+
+### Styling and UI
+- Tailwind CSS
+- Vanilla CSS
+- Framer Motion
+- ShadCN UI
+- Aceternity UI
+- Radix UI
+- Lucide Icons
+
+### Backend
+- Supabase Authentication
+- Supabase Database
+
+### Cryptography
+- Web Crypto API
 
 ## Getting Started
 
-### Configuration
+### Environment Configuration
+Create a `.env` file in the project root:
 
-1. Create a .env file in the root directory:
-   ```env
-   VITE_SUPABASE_URL=your_supabase_url
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-   ```
+```env
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+### OAuth Configuration
 
-2. OAuth Setup:
-   - **GitHub OAuth:** Register a new OAuth application in your GitHub Developer Settings. Set the Authorization Callback URL to `https://[YOUR_PROJECT_ID].supabase.co/auth/v1/callback`.
-   - **Google OAuth:** Create an OAuth client ID in the Google Cloud Console. Add the Authorized Redirect URI as `https://[YOUR_PROJECT_ID].supabase.co/auth/v1/callback`.
-   - **Custom SMTP (via Resend):**
-     1. Go to **Authentication -> Auth Settings -> SMTP Settings**.
-     2. Enable **Custom SMTP**.
-     3. **Sender Email**: `hello+accounts@sampreeth.in` (Verify domain in Resend first).
-     4. **Host**: `smtp.resend.com`
-     5. **Port**: `465` or `587`
-     6. **Username**: `resend`
-     7. **Password**: `[YOUR_RESEND_API_KEY]`
-     8. **Minimum Interval**: `60` seconds.
+#### GitHub OAuth
+1. Register a new OAuth application in GitHub Developer Settings.
+2. Set the **Authorization callback URL** to:  `https://[YOUR_PROJECT_ID].supabase.co/auth/v1/callback`
+
+#### Google OAuth
+1. Create an OAuth 2.0 Client ID in Google Cloud Console.
+2. Add the **Authorized redirect URI**:  `https://[YOUR_PROJECT_ID].supabase.co/auth/v1/callback`
+
+
+#### Custom SMTP via Resend
+1. In Supabase dashboard go to: **Authentication → Settings → SMTP**
+2. Enable **Custom SMTP**
+3. Fill in these values:
+
+- **Sender Email**: `hello+accounts@sampreeth.in`
+- **Host**: `smtp.resend.com`
+- **Port**: `465` or `587`
+- **Username**: `resend`
+- **Password**: `[YOUR_RESEND_API_KEY]`
+- **Minimum Interval**: `60` seconds
+
+4. Make sure your sending domain is verified in Resend first.
 
 ### Running the Project
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+#### Install dependencies
+```bash
+npm install
+```
+#### Start development server
+```bash
+npm run dev
+```
 
-2. Run the development server:
-   ```bash
-   npm run dev
-   ```
+## Development Notes
+Aegis is built with a security-first mindset and clean, high-fidelity UI.
+For local development, confirm your Supabase project has these tables:
+- profiles
+- user_settings
+- vault_items
+- vault_trash
 
-## Development
-
-This project is built with a focus on high-fidelity UI and robust security. For local development, ensure your Supabase instance includes the necessary tables for profiles, user_settings, vault_items, and vault_trash.
-
----
+Row Level Security (RLS) should be enabled and configured so that users can only read/write their own encrypted data — all decryption happens exclusively client-side.
